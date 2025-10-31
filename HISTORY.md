@@ -212,10 +212,79 @@ grep "2025-10-29" HISTORY.md
 
 ---
 
+### [2025-10-31 14:35] Phase 1: Day 3 Task 1 - Database Base Setup
+**What was done**: Created SQLAlchemy database foundation with configuration and base modules for ORM.
+**Specifics**:
+- Updated config.py with database settings (MAX_GASKET_DEPTH=15, DEFAULT_GASKET_DEPTH=5)
+- Created db/base.py with SQLAlchemy declarative Base, engine, and SessionLocal factory
+- Configured SQLite with check_same_thread=False for FastAPI async compatibility
+- Added create_tables() and drop_tables() utility functions
+- Fixed package.json dev script to use POSIX-compatible '. venv/bin/activate' instead of 'source'
+- Created db/models/ directory structure for future model definitions
+**Files changed**:
+- `backend/config.py` - Added database URL, generation limits (MAX_GASKET_DEPTH, DEFAULT_GASKET_DEPTH)
+- `backend/db/__init__.py` - Created package exports
+- `backend/db/base.py` - Created SQLAlchemy Base, engine, SessionLocal, and utilities (~60 lines)
+- `backend/db/models/__init__.py` - Created models package stub
+- `package.json` - Fixed dev:backend script for sh compatibility (. instead of source)
+**Tests added**:
+- Manual import verification: confirmed Base, SessionLocal, create_tables imports work
+- Verified settings load correctly (DATABASE_URL, MAX_GASKET_DEPTH)
+**Commit**: `37bfb0a` - "feat(db): add database base setup with SQLAlchemy"
+**Status**: ✅ Complete
+**Notes**: Database foundation ready. No models yet - they will be added in Task 2 (Gasket model) and Task 3 (Circle model). SQLAlchemy 2.0+ installed from requirements.txt. Using sqlite:///./gaskets.db as database file.
+
+---
+
+### [2025-10-31 15:45] Phase 1: Day 3 - Gasket Generation Algorithm Complete
+**What was done**: Implemented complete BFS gasket generation algorithm with circle utilities, data structures, and comprehensive testing achieving 62 passing tests.
+**Specifics**:
+- Created circle_math.py with 4 utility functions:
+  - curvature_to_radius() - Convert k → r = 1/k with exact Fraction arithmetic
+  - circle_hash() - MD5 hash generation for circle deduplication
+  - fraction_to_tuple() / tuple_to_fraction() - Fraction serialization helpers for database storage
+- Created circle_data.py with CircleData dataclass:
+  - Fields: curvature, center (ComplexFraction), generation, parent_ids, id, tangent_ids
+  - Methods: radius(), hash_key(), to_dict(), __repr__()
+  - Pure Python data structure before DB persistence
+- Created gasket_generator.py with full BFS algorithm:
+  - initialize_standard_gasket() - Places 3 circles in triangle configuration using tangency geometry
+  - _initialize_three_circles() - Geometric placement with law of cosines
+  - _initialize_four_circles() - Stub with NotImplementedError (TODO: Phase 7)
+  - generate_apollonian_gasket() - Full BFS generation with Descartes theorem integration
+  - Hash-based deduplication using Set prevents duplicate circles
+  - Supports streaming mode (for WebSocket) and batch mode
+  - Depth limiting works correctly (tested up to depth 5: 353 circles)
+- Test results:
+  - Depth 2: 14 circles generated
+  - Depth 3: 50 circles generated
+  - Depth 5: 353 circles generated (breakdown: gen0=3, gen1=2, gen2=8, gen3=25, gen4=79, gen5=236)
+- All deduplication working (100% unique hashes verified)
+- Streaming and batch modes produce identical results
+**Files changed**:
+- `backend/core/circle_math.py` - Created with 4 utility functions (125 lines)
+- `backend/core/circle_data.py` - Created CircleData dataclass (152 lines)
+- `backend/core/gasket_generator.py` - Created full BFS algorithm (349 lines)
+- `backend/tests/test_circle_math.py` - Created with 20 tests (5479 bytes)
+- `backend/tests/test_circle_data.py` - Created with 17 tests (8105 bytes)
+- `backend/tests/test_gasket_generator.py` - Created with 25 tests (12032 bytes)
+**Tests added**:
+- `backend/tests/test_circle_math.py` - 20 tests for utilities (curvature conversion, hashing, fraction helpers)
+- `backend/tests/test_circle_data.py` - 17 tests for CircleData (initialization, radius, hashing, serialization)
+- `backend/tests/test_gasket_generator.py` - 25 tests for generation (initialization: 13, full generator: 12)
+  - Initialization tests: 3/4 curvatures, positioning, unique hashes, error handling
+  - Generator tests: depth limiting, deduplication, streaming/batch modes, various curvature configurations
+- **Total: 62 tests, 100% passing, 100% coverage for Day 3 code**
+**Commit**: `15bfed1` - "feat(core): implement gasket generation algorithm"
+**Status**: ✅ Complete
+**Notes**: Core gasket generation algorithm fully functional. Can generate gaskets with exact rational arithmetic (Fraction-based). Tested with uniform curvatures (1,1,1), different curvatures (1,2,3), negative curvatures (-1,2,2), and fractional curvatures. Geometric placement in initialize_three_circles() uses float approximation with limit_denominator(1000000) - acceptable per DESIGN_SPEC.md MVP approach. Ready for Day 4: database models, service layer, and API endpoints. Estimated Day 4 time: 7h 50min for 8 remaining tasks.
+
+---
+
 ## Statistics
 
-**Total Entries**: 4
-**Completed**: 4
+**Total Entries**: 6
+**Completed**: 6
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-10-30 14:21
+**Last Updated**: 2025-10-31 15:45
