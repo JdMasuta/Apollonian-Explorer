@@ -1,12 +1,28 @@
+"""
+Configuration module for Apollonian Gasket application.
+
+Reference: .DESIGN_SPEC.md section 4 (Database Schema)
+"""
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Application configuration settings."""
 
-    DATABASE_URL: str = "sqlite:///./apollonian_gasket.db"
+    # Database
+    DATABASE_URL: str = "sqlite:///./gaskets.db"
+
+    # Application
     DEBUG: bool = True
-    MAX_RECURSION_DEPTH: int = 12
+    APP_NAME: str = "Apollonian Gasket Visualizer"
+    APP_VERSION: str = "1.0.0"
+
+    # Generation limits (from .DESIGN_SPEC.md)
+    MAX_GASKET_DEPTH: int = 15
+    DEFAULT_GASKET_DEPTH: int = 5
+
+    # Cache settings
     CACHE_SIZE_LIMIT_MB: int = 500
 
     class Config:

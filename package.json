@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && uvicorn main:app --reload --port 8000",
+    "dev:backend": "cd backend && . venv/bin/activate && uvicorn main:app --reload --port 8000",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "deploy": "./scripts/deploy.sh"
