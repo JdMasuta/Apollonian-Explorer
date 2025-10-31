@@ -1,6 +1,6 @@
 """Database models package."""
 
-# Models will be imported here as they are created
-# from backend.db.models.gasket import Gasket, Circle
+from db.models.gasket import Gasket
+from db.models.circle import Circle
 
-__all__ = []
+__all__ = ["Gasket", "Circle"]
