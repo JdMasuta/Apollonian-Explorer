@@ -281,10 +281,96 @@ grep "2025-10-29" HISTORY.md
 
 ---
 
+### [2025-10-31 18:30] Phase 1: Day 4 - Database Models, Service Layer, and REST API Complete
+**What was done**: Implemented complete backend REST API with database models, Pydantic schemas, service layer with hash-based caching, and FastAPI endpoints. All Day 4 tasks (5-12) complete with 20 new tests passing.
+**Specifics**:
+- Database Models (Tasks 5-6):
+  - Created Gasket model with hash (SHA-256, indexed), initial_curvatures (JSON), num_circles, max_depth_cached, timestamps, access_count
+  - Created Circle model with exact rational storage (separate num/denom fields for curvature, center_x, center_y, radius)
+  - Implemented hybrid properties (@hybrid_property) for Fraction object access from integer storage
+  - Configured one-to-many relationship (Gasket ↔ Circle) with cascade="all, delete-orphan"
+  - Added composite indexes: (gasket_id, generation) for efficient depth filtering
+  - SQLAlchemy 2.0+ with Mapped type annotations
+- Pydantic Schemas (Task 8):
+  - GasketCreate request schema with comprehensive validation:
+    * Validates 3-4 curvatures
+    * Validates Fraction string format (e.g., "1", "1/2", "-1")
+    * Validates max_depth range (1-15)
+    * Rejects zero curvatures (infinite radius not yet supported)
+  - GasketResponse and CircleResponse schemas for JSON serialization
+  - 15 comprehensive validation tests covering success/failure scenarios
+- Service Layer (Task 10):
+  - GasketService class implementing hash-based caching strategy:
+    * _generate_hash(): SHA-256 of sorted canonical curvatures ("num1/denom1,num2/denom2,...")
+    * create_or_get_gasket(): Cache lookup → check depth sufficiency → return or regenerate
+    * get_gasket(): Retrieve by ID with access tracking (count + timestamp)
+    * _generate_and_persist(): Generate gasket using core algorithm, persist all circles to DB
+    * _gasket_to_response(): Convert DB models to Pydantic responses with depth filtering
+  - Access tracking for future LRU cache eviction policy
+  - Integrates core gasket_generator.generate_apollonian_gasket() with database persistence
+- API Endpoints (Task 11):
+  - POST /api/gaskets: Create or retrieve cached gasket (201 Created, GasketResponse)
+  - GET /api/gaskets/{id}: Retrieve by ID (200 OK / 404 Not Found)
+  - Dependency injection with get_db() for database sessions
+  - Comprehensive error handling:
+    * ValueError → 400 Bad Request with INVALID_CURVATURES error code
+    * Exception → 500 Internal Server Error with GENERATION_ERROR error code
+  - Standardized error response format: {"error_code": "...", "message": "..."}
+- Main App Integration (Task 12):
+  - Added @app.on_event("startup") to create database tables on application start
+  - Enhanced /health endpoint to test database connectivity (returns db_status)
+  - Mounted api_router at /api prefix (app.include_router(api_router, prefix="/api"))
+  - Server verified working: http://localhost:8000/health returns {"status":"healthy","database":"connected","version":"1.0.0"}
+**Files changed**:
+- `backend/db/models/gasket.py` - Created Gasket ORM model (82 lines)
+- `backend/db/models/circle.py` - Created Circle ORM model with hybrid properties (147 lines)
+- `backend/db/models/__init__.py` - Updated to import Gasket and Circle
+- `backend/db/__init__.py` - Updated to export models
+- `backend/schemas/__init__.py` - Created schemas package
+- `backend/schemas/gasket.py` - Created GasketCreate and GasketResponse schemas (109 lines)
+- `backend/schemas/circle.py` - Created CircleResponse schema (29 lines)
+- `backend/api/__init__.py` - Created API package
+- `backend/api/deps.py` - Created get_db() dependency injection function (27 lines)
+- `backend/api/endpoints/__init__.py` - Created endpoints package
+- `backend/api/endpoints/gaskets.py` - Created POST/GET gasket endpoints (105 lines)
+- `backend/api/router.py` - Created main API router aggregator (25 lines)
+- `backend/services/__init__.py` - Created services package
+- `backend/services/gasket_service.py` - Created GasketService with caching logic (266 lines)
+- `backend/main.py` - Updated to mount API router, add startup event, enhance health check
+- `backend/tests/test_models.py` - Created model tests (5 tests, 119 lines)
+- `backend/tests/test_schemas.py` - Created schema validation tests (15 tests, 314 lines)
+**Tests added**:
+- `backend/tests/test_models.py` - 5 tests for database models:
+  * test_create_gasket_model - Model creation and field persistence
+  * test_gasket_circle_relationship - One-to-many relationship with cascade delete
+  * test_circle_hybrid_properties - Fraction getters/setters from num/denom fields
+  * test_circle_center_hybrid_properties - Complex center coordinate access
+  * test_database_tables_exist - Verify schema creation (gaskets, circles tables)
+- `backend/tests/test_schemas.py` - 15 tests for Pydantic validation:
+  * test_gasket_create_valid_three_curvatures - Success: 3 curvatures
+  * test_gasket_create_valid_four_curvatures - Success: 4 curvatures
+  * test_gasket_create_with_fractions - Success: "1/2", "2/3", "3/4"
+  * test_gasket_create_negative_curvature - Success: negative curvatures allowed
+  * test_gasket_create_invalid_too_few - Failure: < 3 curvatures
+  * test_gasket_create_invalid_too_many - Failure: > 4 curvatures
+  * test_gasket_create_invalid_format - Failure: non-numeric strings
+  * test_gasket_create_zero_curvature - Failure: zero curvatures not supported
+  * test_gasket_create_max_depth_validation - Success/Failure: depth bounds (1-15)
+  * test_circle_response_schema - CircleResponse creation
+  * test_gasket_response_schema - GasketResponse with nested CircleResponse
+  * test_gasket_response_no_circles - GasketResponse with empty circles list
+  * test_circle_response_serialization - JSON serialization
+- **Total: 82 tests passing (62 from Day 3 + 5 models + 15 schemas)**
+**Commit**: `003c2e8` - "feat(api): complete Day 4 - database models, schemas, service layer, and API endpoints"
+**Status**: ✅ Complete
+**Notes**: Backend REST API fully functional. Can create/retrieve gaskets via HTTP endpoints. Caching strategy implemented with SHA-256 hashing and depth sufficiency checks. Database automatically initializes on startup. Server tested with uvicorn - /health endpoint confirms database connectivity. Ready for Day 5 Phase 2: Frontend skeleton and basic Canvas2D rendering. Day 4 estimated: 7h 50min, actual: ~4-5 hours. 3 Pydantic deprecation warnings about model_config vs Config class (non-blocking, Pydantic v2 migration).
+
+---
+
 ## Statistics
 
-**Total Entries**: 6
-**Completed**: 6
+**Total Entries**: 7
+**Completed**: 7
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-10-31 15:45
+**Last Updated**: 2025-10-31 18:30
