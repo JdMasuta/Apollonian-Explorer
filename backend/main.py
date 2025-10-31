@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 import os
 
 from api.router import api_router
+from api.endpoints.websocket import router as websocket_router
 from db import create_tables
 
 app = FastAPI(title="Apollonian Gasket API", version="1.0.0")
@@ -49,6 +50,9 @@ def health_check():
 
 # Mount API routes
 app.include_router(api_router, prefix="/api")
+
+# Mount WebSocket routes at root level
+app.include_router(websocket_router)
 
 # Mount static files (frontend build) - only in production
 static_dir = os.path.join(os.path.dirname(__file__), "static")
