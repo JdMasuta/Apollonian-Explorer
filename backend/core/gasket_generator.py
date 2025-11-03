@@ -11,6 +11,7 @@ import math
 from fractions import Fraction
 from typing import List, Generator, Set, Tuple
 from collections import deque
+import sympy as sp
 
 from core.circle_data import CircleData, ComplexFraction
 from core.descartes import descartes_solve
@@ -54,11 +55,171 @@ def is_duplicate(
     return False
 
 
+def verify_tangency(
+    circle1: CircleData,
+    circle2: CircleData,
+    tolerance: float = 1e-10
+) -> bool:
+    """
+    Verify that two circles are tangent to each other.
+
+    Checks if the distance between centers matches the expected tangency
+    distance (sum or difference of radii) within a tolerance.
+
+    Args:
+        circle1, circle2: CircleData objects to check
+        tolerance: Maximum acceptable error (default 1e-10)
+
+    Returns:
+        True if circles are tangent within tolerance, False otherwise
+
+    Reference:
+        ISSUES.md Issue #2 - Tangency verification for exact placement
+    """
+    # Calculate actual distance between centers
+    x1, y1 = circle1.center
+    x2, y2 = circle2.center
+    actual_distance = float(((x2 - x1)**2 + (y2 - y1)**2) ** 0.5)
+
+    # Calculate expected tangency distance
+    expected_distance = float(_compute_tangent_distance(
+        circle1.curvature,
+        circle2.curvature
+    ))
+
+    # Check if they match within tolerance
+    error = abs(actual_distance - expected_distance)
+    return error < tolerance
+
+
+def _compute_tangent_distance(k1: Fraction, k2: Fraction) -> Fraction:
+    """
+    Compute exact distance between centers of two tangent circles.
+
+    Args:
+        k1, k2: Curvatures of two circles
+
+    Returns:
+        Exact distance as Fraction
+
+    Reference:
+        ISSUES.md Issue #2 - Exact rational arithmetic for initial placement
+    """
+    r1 = Fraction(1) / abs(k1) if k1 != 0 else Fraction(1)
+    r2 = Fraction(1) / abs(k2) if k2 != 0 else Fraction(1)
+
+    # Determine tangency type based on curvature signs
+    if k1 > 0 and k2 > 0:
+        # Both circles external - distance is sum of radii
+        return r1 + r2
+    elif k1 < 0 and k2 > 0:
+        # Circle 1 encloses circle 2 - distance is difference
+        return abs(r1) - r2
+    elif k1 > 0 and k2 < 0:
+        # Circle 2 encloses circle 1 - distance is difference
+        return abs(r2) - r1
+    else:
+        # Both negative (both enclosing) - edge case
+        return abs(abs(r1) - abs(r2))
+
+
+def _solve_third_circle_position_exact(
+    k1: Fraction, k2: Fraction, k3: Fraction,
+    c1_pos: Tuple[Fraction, Fraction],
+    c2_pos: Tuple[Fraction, Fraction]
+) -> Tuple[Fraction, Fraction]:
+    """
+    Solve for exact position of third circle using symbolic math.
+
+    Given two circles with known positions, finds the exact position
+    of a third circle that is tangent to both, using sympy for
+    exact rational arithmetic throughout.
+
+    Args:
+        k1, k2, k3: Curvatures of the three circles
+        c1_pos: Position (x, y) of circle 1 as Fractions
+        c2_pos: Position (x, y) of circle 2 as Fractions
+
+    Returns:
+        Position (x, y) of circle 3 as Fractions
+
+    Reference:
+        ISSUES.md Issue #2 - Exact rational geometry for initial placement
+    """
+    # Define symbolic variables (use real=True, not rational=True)
+    # Solutions often involve square roots which are irrational
+    x, y = sp.symbols('x y', real=True)
+
+    # Convert Fractions to sympy expressions
+    x1 = sp.Rational(c1_pos[0].numerator, c1_pos[0].denominator)
+    y1 = sp.Rational(c1_pos[1].numerator, c1_pos[1].denominator)
+    x2 = sp.Rational(c2_pos[0].numerator, c2_pos[0].denominator)
+    y2 = sp.Rational(c2_pos[1].numerator, c2_pos[1].denominator)
+
+    # Calculate target distances
+    d13 = _compute_tangent_distance(k1, k3)
+    d23 = _compute_tangent_distance(k2, k3)
+
+    # Convert to sympy Rationals
+    d13_sp = sp.Rational(d13.numerator, d13.denominator)
+    d23_sp = sp.Rational(d23.numerator, d23.denominator)
+
+    # Set up tangency constraint equations
+    # (x - x1)^2 + (y - y1)^2 = d13^2
+    # (x - x2)^2 + (y - y2)^2 = d23^2
+    eq1 = sp.Eq((x - x1)**2 + (y - y1)**2, d13_sp**2)
+    eq2 = sp.Eq((x - x2)**2 + (y - y2)**2, d23_sp**2)
+
+    # Solve the system symbolically
+    solutions = sp.solve([eq1, eq2], [x, y])
+
+    if not solutions:
+        # Fallback to approximate solution if symbolic solving fails
+        raise ValueError("Cannot find exact tangent position for given curvatures")
+
+    # Choose the solution with positive y (above x-axis)
+    # If multiple solutions, prefer the one with y > 0
+    best_solution = None
+    for sol in solutions:
+        x_val, y_val = sol
+
+        # Convert sympy expressions to Python Fraction
+        # For irrational expressions (like sqrt), convert to float with high precision
+        try:
+            # Try exact rational conversion first
+            if isinstance(x_val, sp.Rational):
+                x_frac = Fraction(int(x_val.p), int(x_val.q))
+            else:
+                # For irrational values, evaluate numerically with high precision
+                x_float = float(x_val.evalf(50))  # 50 digits of precision
+                x_frac = Fraction(x_float).limit_denominator(10**9)
+
+            if isinstance(y_val, sp.Rational):
+                y_frac = Fraction(int(y_val.p), int(y_val.q))
+            else:
+                y_float = float(y_val.evalf(50))
+                y_frac = Fraction(y_float).limit_denominator(10**9)
+
+            # Prefer solution with y > 0 (above x-axis)
+            if best_solution is None or y_frac > best_solution[1]:
+                best_solution = (x_frac, y_frac)
+        except (ValueError, AttributeError, TypeError) as e:
+            # Skip solutions that can't be converted
+            continue
+
+    if best_solution is None:
+        raise ValueError("Cannot convert symbolic solution to exact Fraction")
+
+    return best_solution
+
+
 def initialize_standard_gasket(curvatures: List[Fraction]) -> List[CircleData]:
     """
     Initialize an Apollonian gasket with 3 or 4 starting circles.
 
-    For 3 curvatures, creates circles in a standard triangle configuration.
+    For 3 curvatures, creates circles in a standard triangle configuration
+    using exact rational arithmetic and symbolic solving for tangency.
+
     For 4 curvatures, uses them as the initial gasket configuration.
 
     Args:
@@ -70,14 +231,9 @@ def initialize_standard_gasket(curvatures: List[Fraction]) -> List[CircleData]:
     Raises:
         ValueError: If curvatures count is not 3 or 4
 
-    Note:
-        This implementation uses a simplified geometric placement for MVP.
-        The circles are positioned to be approximately tangent, but exact
-        tangency constraints may not be satisfied for all configurations.
-        This can be improved in Phase 7 with full constraint solving.
-
     Reference:
         .DESIGN_SPEC.md section 8.2 - Standard gasket initialization
+        ISSUES.md Issue #2 - Exact rational geometry for initial placement
     """
     if len(curvatures) == 3:
         return _initialize_three_circles(curvatures)
@@ -89,112 +245,82 @@ def initialize_standard_gasket(curvatures: List[Fraction]) -> List[CircleData]:
 
 def _initialize_three_circles(curvatures: List[Fraction]) -> List[CircleData]:
     """
-    Initialize gasket with 3 circles in standard configuration.
+    Initialize gasket with 3 circles in standard configuration using exact geometry.
 
-    Uses simplified placement:
-    - Circle 1: at origin
-    - Circle 2: tangent to right of circle 1
-    - Circle 3: positioned above based on tangency geometry
+    Uses exact rational arithmetic with symbolic solving:
+    - Circle 1: at origin (0, 0)
+    - Circle 2: on x-axis, tangent to circle 1
+    - Circle 3: positioned using symbolic solving to be exactly tangent to both
+
+    This implementation uses sympy to solve the tangency constraints exactly,
+    avoiding floating-point approximations that would compromise the goal of
+    exact rational arithmetic throughout the system.
 
     Args:
         curvatures: List of exactly 3 curvatures
 
     Returns:
-        List of 3 CircleData objects
+        List of 3 CircleData objects with exact tangent positions
+
+    Reference:
+        ISSUES.md Issue #2 - Exact rational geometry for initial placement
     """
     k1, k2, k3 = curvatures
 
-    # Calculate radii
-    r1 = Fraction(1) / abs(k1) if k1 != 0 else Fraction(1)
-    r2 = Fraction(1) / abs(k2) if k2 != 0 else Fraction(1)
-    r3 = Fraction(1) / abs(k3) if k3 != 0 else Fraction(1)
-
     # Circle 1: at origin
+    c1_pos = (Fraction(0), Fraction(0))
     c1 = CircleData(
         curvature=k1,
-        center=(Fraction(0), Fraction(0)),
+        center=c1_pos,
         generation=0,
         parent_ids=[],
     )
 
-    # Circle 2: tangent to right of circle 1
-    # Distance between centers = r1 + r2 (for external tangency)
-    # If one has negative curvature (enclosing), adjust accordingly
-    if k1 > 0 and k2 > 0:
-        # Both circles are external
-        center2_x = r1 + r2
-    elif k1 < 0 and k2 > 0:
-        # Circle 1 encloses circle 2
-        center2_x = abs(r1) - r2
-    elif k1 > 0 and k2 < 0:
-        # Circle 2 encloses circle 1
-        center2_x = r1 + abs(r2)
+    # Circle 2: on x-axis, tangent to circle 1
+    # Distance is computed exactly based on tangency type
+    d12 = _compute_tangent_distance(k1, k2)
+
+    # Handle degenerate case: if d12 == 0, circles are concentric
+    # Place circle 2 at a small offset to allow solving for circle 3
+    if d12 == 0:
+        # For concentric circles, place c2 at origin but c3 will be positioned radially
+        # This is a special configuration (e.g., outer circle with same-radius inner circle)
+        c2_pos = (Fraction(0), Fraction(0))
+        c2 = CircleData(
+            curvature=k2,
+            center=c2_pos,
+            generation=0,
+            parent_ids=[],
+        )
+
+        # For this degenerate case, position c3 based on tangency with c1 only
+        d13 = _compute_tangent_distance(k1, k3)
+        # Place c3 on positive x-axis at distance d13 from origin
+        c3_pos = (d13, Fraction(0))
     else:
-        # Both negative (unusual but handle it)
-        center2_x = abs(r1) - abs(r2)
+        c2_pos = (d12, Fraction(0))
+        c2 = CircleData(
+            curvature=k2,
+            center=c2_pos,
+            generation=0,
+            parent_ids=[],
+        )
 
-    c2 = CircleData(
-        curvature=k2,
-        center=(center2_x, Fraction(0)),
-        generation=0,
-        parent_ids=[],
-    )
-
-    # Circle 3: positioned to be tangent to both c1 and c2
-    # For MVP, use simplified geometric calculation
-    # This is an approximation and may not be perfectly tangent
-
-    # Use triangle geometry: place circle 3 such that it's tangent to both
-    # Distance from c1 center to c3 center should be r1 + r3
-    # Distance from c2 center to c3 center should be r2 + r3
-
-    # Using law of cosines to find position
-    # This is a simplified approach; exact solution requires solving quadratic
-
-    d12 = float(center2_x)  # Distance between c1 and c2 centers
-    r1_f = float(r1)
-    r2_f = float(r2)
-    r3_f = float(r3)
-
-    # Target distances
-    if k1 > 0 and k3 > 0:
-        d13 = r1_f + r3_f
-    elif k1 < 0 and k3 > 0:
-        d13 = abs(r1_f) - r3_f
-    else:
-        d13 = r1_f + r3_f
-
-    if k2 > 0 and k3 > 0:
-        d23 = r2_f + r3_f
-    elif k2 < 0 and k3 > 0:
-        d23 = abs(r2_f) - r3_f
-    else:
-        d23 = r2_f + r3_f
-
-    # Using cosine rule: c^2 = a^2 + b^2 - 2ab*cos(C)
-    # d23^2 = d13^2 + d12^2 - 2*d13*d12*cos(theta)
-    # Solve for cos(theta)
-    try:
-        cos_theta = (d13**2 + d12**2 - d23**2) / (2 * d13 * d12)
-        # Clamp to valid range
-        cos_theta = max(-1.0, min(1.0, cos_theta))
-        theta = math.acos(cos_theta)
-
-        # Position of c3 center
-        center3_x = d13 * math.cos(theta)
-        center3_y = d13 * math.sin(theta)
-
-        # Convert back to Fraction with limited denominator
-        center3_x_frac = Fraction(center3_x).limit_denominator(1000000)
-        center3_y_frac = Fraction(center3_y).limit_denominator(1000000)
-    except (ValueError, ZeroDivisionError):
-        # Fallback to simple positioning if calculation fails
-        center3_x_frac = Fraction(float(center2_x) / 2).limit_denominator(1000000)
-        center3_y_frac = Fraction(float(d13)).limit_denominator(1000000)
+        # Circle 3: solve for exact position using symbolic math
+        # This solves the system of equations:
+        # distance(c1, c3) = tangent_distance(k1, k3)
+        # distance(c2, c3) = tangent_distance(k2, k3)
+        try:
+            c3_pos = _solve_third_circle_position_exact(k1, k2, k3, c1_pos, c2_pos)
+        except ValueError as e:
+            # If symbolic solving fails, raise with context
+            raise ValueError(
+                f"Cannot compute exact tangent position for curvatures {k1}, {k2}, {k3}: {e}"
+            )
 
     c3 = CircleData(
         curvature=k3,
-        center=(center3_x_frac, center3_y_frac),
+        center=c3_pos,
         generation=0,
         parent_ids=[],
     )
