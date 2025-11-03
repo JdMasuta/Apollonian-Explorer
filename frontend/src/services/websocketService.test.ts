@@ -76,6 +76,9 @@ describe('WebSocketService', () => {
   let mockWebSocket: MockWebSocket;
 
   beforeEach(() => {
+    // Use fake timers to control async timing
+    vi.useFakeTimers();
+
     // Mock global WebSocket
     mockWebSocket = null as any;
     (global as any).WebSocket = function (this: any, url: string) {
@@ -88,12 +91,20 @@ describe('WebSocketService', () => {
   });
 
   afterEach(() => {
+    // Flush any pending timers before cleanup
+    vi.runOnlyPendingTimers();
     vi.restoreAllMocks();
+    // Restore real timers
+    vi.useRealTimers();
   });
 
   describe('connect()', () => {
     it('should connect to WebSocket server', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Advance timers to trigger onopen
+      await Promise.resolve(); // Flush microtasks
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       expect(mockWebSocket).toBeTruthy();
       expect(mockWebSocket.url).toBe('ws://localhost:8000/ws/gasket/generate');
@@ -101,7 +112,10 @@ describe('WebSocketService', () => {
     });
 
     it('should resolve immediately if already connected', async () => {
-      await websocketService.connect();
+      const connectPromise1 = websocketService.connect();
+      vi.advanceTimersByTime(0); // Advance timers for first connection
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise1;
       const firstWebSocket = mockWebSocket;
 
       await websocketService.connect();
@@ -121,13 +135,20 @@ describe('WebSocketService', () => {
         return mockWebSocket as any;
       };
 
-      await expect(websocketService.connect()).rejects.toThrow();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Advance timers to trigger error
+      await Promise.resolve(); // Flush microtasks
+
+      await expect(connectPromise).rejects.toThrow('WebSocket connection failed');
     });
   });
 
   describe('generateGasket()', () => {
     it('should send generate request with correct format', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       const callbacks = {
         onProgress: vi.fn(),
@@ -164,7 +185,10 @@ describe('WebSocketService', () => {
 
   describe('Message routing', () => {
     it('should route progress messages to onProgress callback', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       const callbacks = {
         onProgress: vi.fn(),
@@ -198,7 +222,10 @@ describe('WebSocketService', () => {
     });
 
     it('should route complete messages to onComplete callback', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       const callbacks = {
         onProgress: vi.fn(),
@@ -222,7 +249,10 @@ describe('WebSocketService', () => {
     });
 
     it('should route error messages to onError callback', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       const callbacks = {
         onProgress: vi.fn(),
@@ -245,7 +275,10 @@ describe('WebSocketService', () => {
     });
 
     it('should handle multiple progress messages', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       const callbacks = {
         onProgress: vi.fn(),
@@ -271,7 +304,11 @@ describe('WebSocketService', () => {
 
   describe('disconnect()', () => {
     it('should close WebSocket connection', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
+
       expect(websocketService.isConnected()).toBe(true);
 
       websocketService.disconnect();
@@ -288,7 +325,11 @@ describe('WebSocketService', () => {
 
   describe('isConnected()', () => {
     it('should return true when connected', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
+
       expect(websocketService.isConnected()).toBe(true);
     });
 
@@ -297,7 +338,11 @@ describe('WebSocketService', () => {
     });
 
     it('should return false after disconnect', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
+
       websocketService.disconnect();
       expect(websocketService.isConnected()).toBe(false);
     });
@@ -305,7 +350,11 @@ describe('WebSocketService', () => {
 
   describe('getReadyState()', () => {
     it('should return ready state when connected', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
+
       expect(websocketService.getReadyState()).toBe(MockWebSocket.OPEN);
     });
 
@@ -316,7 +365,10 @@ describe('WebSocketService', () => {
 
   describe('Error handling', () => {
     it('should handle invalid JSON in messages', async () => {
-      await websocketService.connect();
+      const connectPromise = websocketService.connect();
+      vi.advanceTimersByTime(0); // Ensure connection completes
+      await Promise.resolve(); // Flush microtasks
+      await connectPromise;
 
       const callbacks = {
         onProgress: vi.fn(),
