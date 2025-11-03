@@ -16,6 +16,44 @@ from core.circle_data import CircleData, ComplexFraction
 from core.descartes import descartes_solve
 
 
+def is_duplicate(
+    curvature: Fraction,
+    center: Tuple[Fraction, Fraction],
+    existing_circles: List[CircleData],
+    tolerance: float = 1e-10
+) -> bool:
+    """
+    Check if a circle is a duplicate of any existing circle.
+
+    Uses numerical tolerance to handle floating-point precision issues
+    in square root calculations during Descartes theorem.
+
+    Args:
+        curvature: Curvature of the circle to check
+        center: Center coordinates as (x, y) tuple of Fractions
+        existing_circles: List of CircleData objects to check against
+        tolerance: Maximum difference for considering values equal (default 1e-10)
+
+    Returns:
+        True if circle matches any existing circle within tolerance, False otherwise
+
+    Reference:
+        ISSUES.md Issue #3 - Incomplete deduplication in BFS
+    """
+    for existing in existing_circles:
+        # Check curvature match
+        curvature_diff = abs(float(curvature - existing.curvature))
+        if curvature_diff < tolerance:
+            # Check center coordinates match
+            center_x_diff = abs(float(center[0] - existing.center[0]))
+            center_y_diff = abs(float(center[1] - existing.center[1]))
+
+            if center_x_diff < tolerance and center_y_diff < tolerance:
+                return True
+
+    return False
+
+
 def initialize_standard_gasket(curvatures: List[Fraction]) -> List[CircleData]:
     """
     Initialize an Apollonian gasket with 3 or 4 starting circles.
@@ -259,6 +297,14 @@ def generate_apollonian_gasket(
             # Process both new circles
             new_circles = []
             for k, z in [(k_new1, z_new1), (k_new2, z_new2)]:
+                # ISSUE #3 FIX: Check if this solution is a parent circle
+                # Descartes theorem returns two solutions: one new circle + one parent
+                # We must explicitly discard the parent before hash checking
+                if is_duplicate(k, z, [c1, c2, c3]):
+                    # This is the parent circle that was part of the quartet
+                    # Skip it and continue to the next solution
+                    continue
+
                 # Create CircleData object
                 new_circle = CircleData(
                     curvature=k,
@@ -270,14 +316,17 @@ def generate_apollonian_gasket(
                 # Check for duplicates using hash
                 hash_key = new_circle.hash_key()
                 if hash_key not in circle_hashes:
-                    # New unique circle found
-                    circle_hashes.add(hash_key)
-                    circles.append(new_circle)
-                    new_circles.append(new_circle)
+                    # ISSUE #3 FIX: Additional numerical tolerance check
+                    # Hash may miss duplicates due to sqrt approximation errors
+                    if not is_duplicate(k, z, circles):
+                        # New unique circle found
+                        circle_hashes.add(hash_key)
+                        circles.append(new_circle)
+                        new_circles.append(new_circle)
 
-                    # Yield immediately if streaming
-                    if stream:
-                        yield new_circle
+                        # Yield immediately if streaming
+                        if stream:
+                            yield new_circle
 
             # Step 6: Add new triplets to queue for next iteration
             # For each new circle, create triplets with existing parent circles

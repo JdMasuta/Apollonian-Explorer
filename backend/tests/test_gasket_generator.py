@@ -6,7 +6,12 @@ Reference: backend/core/gasket_generator.py
 
 import pytest
 from fractions import Fraction
-from core.gasket_generator import initialize_standard_gasket, generate_apollonian_gasket
+from core.gasket_generator import (
+    initialize_standard_gasket,
+    generate_apollonian_gasket,
+    is_duplicate
+)
+from core.circle_data import CircleData
 
 
 class TestInitializeStandardGasket:
@@ -292,3 +297,230 @@ class TestGenerateApollonianGasket:
         # Exact count may vary based on deduplication and geometry
         assert len(circles) >= 10  # Should have at least 10 circles at depth 2
         assert len(circles) <= 20  # Should not have more than 20
+
+
+class TestIsDuplicate:
+    """
+    Tests for is_duplicate() helper function.
+
+    Reference: ISSUES.md Issue #3 - Incomplete deduplication
+    """
+
+    def test_identical_circle_is_duplicate(self):
+        """Test that identical circles are detected as duplicates."""
+        circle1 = CircleData(
+            curvature=Fraction(1),
+            center=(Fraction(0), Fraction(0)),
+            generation=0,
+            parent_ids=[]
+        )
+        circle2 = CircleData(
+            curvature=Fraction(1),
+            center=(Fraction(0), Fraction(0)),
+            generation=0,
+            parent_ids=[]
+        )
+
+        assert is_duplicate(
+            circle2.curvature,
+            circle2.center,
+            [circle1]
+        )
+
+    def test_different_curvature_not_duplicate(self):
+        """Test that circles with different curvatures are not duplicates."""
+        circle1 = CircleData(
+            curvature=Fraction(1),
+            center=(Fraction(0), Fraction(0)),
+            generation=0,
+            parent_ids=[]
+        )
+
+        assert not is_duplicate(
+            Fraction(2),  # Different curvature
+            (Fraction(0), Fraction(0)),
+            [circle1]
+        )
+
+    def test_different_position_not_duplicate(self):
+        """Test that circles with different positions are not duplicates."""
+        circle1 = CircleData(
+            curvature=Fraction(1),
+            center=(Fraction(0), Fraction(0)),
+            generation=0,
+            parent_ids=[]
+        )
+
+        assert not is_duplicate(
+            Fraction(1),
+            (Fraction(1), Fraction(0)),  # Different position
+            [circle1]
+        )
+
+    def test_near_duplicate_within_tolerance(self):
+        """Test that near-duplicates within tolerance are detected."""
+        circle1 = CircleData(
+            curvature=Fraction(1),
+            center=(Fraction(0), Fraction(0)),
+            generation=0,
+            parent_ids=[]
+        )
+
+        # Very slightly different due to floating-point approximation
+        # Difference: 1e-12, which is less than default tolerance (1e-10)
+        near_curvature = Fraction(1000000000000, 1000000000001)
+
+        assert is_duplicate(
+            near_curvature,
+            (Fraction(0), Fraction(0)),
+            [circle1],
+            tolerance=1e-10
+        )
+
+    def test_near_duplicate_outside_tolerance(self):
+        """Test that near-duplicates outside tolerance are not detected."""
+        circle1 = CircleData(
+            curvature=Fraction(1),
+            center=(Fraction(0), Fraction(0)),
+            generation=0,
+            parent_ids=[]
+        )
+
+        # Difference: 0.01, which is greater than tolerance (1e-10)
+        different_curvature = Fraction(101, 100)
+
+        assert not is_duplicate(
+            different_curvature,
+            (Fraction(0), Fraction(0)),
+            [circle1],
+            tolerance=1e-10
+        )
+
+    def test_duplicate_in_list_of_many(self):
+        """Test finding duplicate in a list of multiple circles."""
+        circles = [
+            CircleData(Fraction(1), (Fraction(0), Fraction(0)), 0, []),
+            CircleData(Fraction(2), (Fraction(1), Fraction(0)), 0, []),
+            CircleData(Fraction(3), (Fraction(2), Fraction(0)), 0, []),
+        ]
+
+        # Should match the second circle
+        assert is_duplicate(
+            Fraction(2),
+            (Fraction(1), Fraction(0)),
+            circles
+        )
+
+    def test_no_duplicate_in_empty_list(self):
+        """Test that no duplicate is found in empty list."""
+        assert not is_duplicate(
+            Fraction(1),
+            (Fraction(0), Fraction(0)),
+            []
+        )
+
+
+class TestParentCircleDetection:
+    """
+    Tests for parent circle detection in gasket generation.
+
+    Reference: ISSUES.md Issue #3 - Incomplete deduplication
+    """
+
+    def test_no_parent_circles_reappear_depth_1(self):
+        """Test that parent circles are not added back at depth 1."""
+        curvatures = [Fraction(1), Fraction(1), Fraction(1)]
+        circles = list(generate_apollonian_gasket(curvatures, max_depth=1, stream=False))
+
+        # Get initial circles (generation 0)
+        initial_circles = [c for c in circles if c.generation == 0]
+        assert len(initial_circles) == 3
+
+        # Get new circles (generation 1)
+        new_circles = [c for c in circles if c.generation == 1]
+
+        # Check that no generation-1 circle matches any initial circle
+        for new_circle in new_circles:
+            for initial_circle in initial_circles:
+                # They should not be duplicates
+                assert not is_duplicate(
+                    new_circle.curvature,
+                    new_circle.center,
+                    [initial_circle]
+                ), f"Generation 1 circle should not match initial circle"
+
+    def test_no_parent_circles_reappear_depth_2(self):
+        """Test that parent circles are not added back at depth 2."""
+        curvatures = [Fraction(1), Fraction(1), Fraction(1)]
+        circles = list(generate_apollonian_gasket(curvatures, max_depth=2, stream=False))
+
+        # Group by generation
+        by_gen = {}
+        for circle in circles:
+            if circle.generation not in by_gen:
+                by_gen[circle.generation] = []
+            by_gen[circle.generation].append(circle)
+
+        # For each generation, ensure no circle appears in earlier generations
+        for gen in [1, 2]:
+            if gen in by_gen and gen - 1 in by_gen:
+                current_gen_circles = by_gen[gen]
+                previous_gens_circles = []
+                for prev_gen in range(gen):
+                    if prev_gen in by_gen:
+                        previous_gens_circles.extend(by_gen[prev_gen])
+
+                # Check that no current-generation circle matches any previous circle
+                for current_circle in current_gen_circles:
+                    assert not is_duplicate(
+                        current_circle.curvature,
+                        current_circle.center,
+                        previous_gens_circles
+                    ), f"Gen {gen} circle should not match earlier generations"
+
+    def test_all_circles_unique_across_generations(self):
+        """Test that all circles are unique across all generations."""
+        curvatures = [Fraction(1), Fraction(1), Fraction(1)]
+        circles = list(generate_apollonian_gasket(curvatures, max_depth=3, stream=False))
+
+        # Check every pair of circles
+        for i, circle1 in enumerate(circles):
+            for j, circle2 in enumerate(circles):
+                if i != j:
+                    # Two different circles should not be duplicates
+                    assert not is_duplicate(
+                        circle2.curvature,
+                        circle2.center,
+                        [circle1]
+                    ), f"Circle {i} and circle {j} are duplicates"
+
+    def test_hash_deduplication_still_works(self):
+        """Test that hash-based deduplication still functions correctly."""
+        curvatures = [Fraction(1), Fraction(1), Fraction(1)]
+        circles = list(generate_apollonian_gasket(curvatures, max_depth=3, stream=False))
+
+        # All hashes should still be unique
+        hashes = [c.hash_key() for c in circles]
+        unique_hashes = set(hashes)
+
+        assert len(hashes) == len(unique_hashes), \
+            "Hash deduplication should prevent duplicate hashes"
+
+    def test_numerical_tolerance_catches_edge_cases(self):
+        """Test that numerical tolerance catches near-duplicates missed by hashing."""
+        curvatures = [Fraction(1), Fraction(1), Fraction(1)]
+        circles = list(generate_apollonian_gasket(curvatures, max_depth=2, stream=False))
+
+        # Manually check that no two circles are within tolerance
+        tolerance = 1e-10
+        for i, circle1 in enumerate(circles):
+            for j, circle2 in enumerate(circles):
+                if i != j:
+                    curvature_diff = abs(float(circle1.curvature - circle2.curvature))
+                    center_x_diff = abs(float(circle1.center[0] - circle2.center[0]))
+                    center_y_diff = abs(float(circle1.center[1] - circle2.center[1]))
+
+                    # If curvatures match within tolerance, centers should differ
+                    if curvature_diff < tolerance:
+                        assert (center_x_diff >= tolerance or center_y_diff >= tolerance), \
+                            f"Circles {i} and {j} are too similar (within tolerance)"
