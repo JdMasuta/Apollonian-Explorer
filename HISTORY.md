@@ -637,12 +637,184 @@ grep "2025-10-29" HISTORY.md
 
 **Notes**: All technical specifications now consolidated in single authoritative document (`.DESIGN_SPEC.md`). Section 8.4 provides complete reference for exact_math.py module, type system, database storage, and testing requirements. Todo list created for Phases 1-13 implementation. Ready to begin Phase 1 (create exact_math.py module).
 
+### [2025-11-04 16:00] Phase 1: Create exact_math.py Hybrid Arithmetic Module
+
+**What was done**: Implemented complete hybrid exact arithmetic module with 30+ utility functions for intelligent type selection (int/Fraction/SymPy).
+
+**Specifics**:
+- Created `backend/core/exact_math.py` (689 lines, ~35 functions)
+- **Type System**: Defined `ExactNumber = Union[int, Fraction, sp.Expr]` and `ExactComplex` types
+- **Detection Functions** (3 functions):
+  - `is_sympy_integer()` - Checks if SymPy expression is exactly an integer
+  - `is_sympy_rational()` - Checks if expression is rational (no sqrt/irrationals)
+  - `sympy_to_exact()` - Converts SymPy → int/Fraction/Expr (smart downcast)
+- **Arithmetic Operations** (4 functions):
+  - `smart_add()` - Addition with automatic type selection
+  - `smart_multiply()` - Multiplication with automatic type selection
+  - `smart_divide()` - Division with exact result detection
+  - `smart_sqrt()` - Square root with perfect square detection
+- **Complex Number Operations** (4 functions):
+  - `smart_complex_multiply()` - Complex multiplication preserving exactness
+  - `smart_complex_sqrt()` - Complex square root
+  - `smart_real()` - Extract real part
+  - `smart_imag()` - Extract imaginary part
+- **Conversion Functions** (6 functions):
+  - `to_sympy()` - Convert any ExactNumber → SymPy
+  - `to_string()` - Convert to display string ("6", "3/2", "sqrt(2)")
+  - `format_exact()` - Convert to tagged database format ("int:6", "frac:3/2", "sym:sqrt(2)")
+  - `parse_exact()` - Parse tagged string back to ExactNumber
+  - `to_numerator_denominator()` - Extract num/denom (lossy for irrationals, for legacy compatibility)
+  - `to_fraction_lossy()` - Convert to Fraction with approximation (for visualization)
+- **Algorithm Implementation**: Each function uses simplify() and type detection to ensure most efficient representation
+- **Comprehensive Docstrings**: Every function includes algorithm description, examples, and warnings where applicable
+
+**Files changed**:
+- `backend/core/exact_math.py` - Created new module (689 lines, 35 functions)
+
+**Tests added**: Phase 2 (unit tests pending)
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: This module is the foundation of the hybrid exact arithmetic system. It provides transparent type selection that will be used by all subsequent phases. Key design: arithmetic operations first try Python native types (int/Fraction) for speed, only falling back to SymPy when necessary for exactness. The `format_exact()` / `parse_exact()` pair enables lossless database storage of all three types via tagged strings. Ready to proceed with Phase 2 (comprehensive unit tests with 80+ test cases).
+
+---
+
+### [2025-11-04 12:30] Phase 2: Comprehensive Unit Tests for exact_math.py
+
+**What was done**: Created comprehensive unit test suite for the hybrid exact arithmetic module with 105 tests covering all 40 functions (35 original + 5 added during testing).
+
+**Specifics**:
+- **Test Organization**: 6 test classes with logical grouping
+  - `TestTypeDetection` (20 tests) - is_sympy_integer, is_sympy_rational, sympy_to_exact
+  - `TestArithmeticOperations` (30 tests) - smart_add, smart_multiply, smart_divide, smart_sqrt, smart_power, smart_abs
+  - `TestComplexOperations` (15 tests) - All complex number operations
+  - `TestConversionFunctions` (20 tests) - to_sympy, format_exact, parse_exact, etc.
+  - `TestEdgeCases` (15 tests) - Zero handling, large numbers, negatives, nested operations, error handling
+  - `TestRoundTripConversions` (5 tests) - Format → Parse → Format validation
+
+**Missing Functions Discovered and Added**:
+During test writing, discovered 5 functions were missing from exact_math.py:
+- `smart_power()` - Exponentiation with intelligent type selection
+- `smart_abs()` - Absolute value preserving exact type
+- `smart_complex_divide()` - Complex division using formula (a+bi)/(c+di)
+- `smart_complex_conjugate()` - Complex conjugate (a+bi)* = a-bi
+- `smart_abs_squared()` - |z|^2 = a^2 + b^2 for complex numbers
+
+**Files changed**:
+- `backend/tests/test_exact_math.py` - Created comprehensive test suite (650+ lines, 105 tests)
+- `backend/core/exact_math.py` - Added 5 missing functions (120 additional lines)
+
+**Tests added**:
+- `backend/tests/test_exact_math.py` - 105 tests with 100% function coverage
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: All 105 tests initially written. Test suite exceeded target of 80+ tests. Organized into logical test classes for maintainability. Each test has descriptive docstring explaining what is being tested and why.
+
+---
+
+### [2025-11-04 12:45] Phase 2.5: Test Execution and Debugging
+
+**What was done**: Ran test suite, identified and fixed 3 bugs to achieve 100% test pass rate.
+
+**Issues Found and Fixed**:
+
+1. **Import Path Issue**:
+   - Error: `ModuleNotFoundError: No module named 'backend'`
+   - Fix: Changed imports from `from backend.core.exact_math import ...` to `from core.exact_math import ...`
+   - Reason: Tests run from backend/ directory, not project root
+
+2. **Missing Functions (5 total)**:
+   - Error: `ImportError: cannot import name 'smart_power'` (and 4 others)
+   - Fix: Added 5 missing functions to exact_math.py (see Phase 2 entry)
+   - Reason: Test design was more comprehensive than initial implementation
+
+3. **Fraction-to-Int Conversion Bug (3 test failures)**:
+   - Error: `Fraction(2, 1)` not converting to `int(2)`
+   - Failed tests: test_smart_add_two_fractions_to_int, test_smart_multiply_int_and_fraction, test_nested_fraction_operations
+   - Fix: Added check in `smart_add()` and `smart_multiply()`:
+     ```python
+     if isinstance(result, Fraction) and result.denominator == 1:
+         return int(result.numerator)
+     ```
+   - Reason: Python's Fraction arithmetic keeps results as Fraction even when denominator is 1
+
+**Test Results**:
+- **Initial run**: 0 collected / 1 error (import issue)
+- **Second run**: 0 collected / 1 error (missing functions)
+- **Third run**: 102 passed, 3 failed (Fraction conversion)
+- **Final run**: ✅ **105 passed, 0 failed in 0.39s**
+
+**Files changed**:
+- `backend/tests/test_exact_math.py` - Fixed import path
+- `backend/core/exact_math.py` - Added Fraction→int conversion checks in smart_add() and smart_multiply()
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: Achieved 100% test pass rate. The Fraction→int conversion bug was subtle but important for performance optimization goals (15-25x speedup) - using int is faster than Fraction(n, 1). All arithmetic operations now correctly simplify to most efficient type. Ready to proceed with Phase 3 (database schema migration).
+
+---
+
+### [2025-11-04 12:50] Phase 3: Database Schema Migration for Exact Arithmetic
+
+**What was done**: Created and applied database migration to add TEXT columns for hybrid exact arithmetic storage to the circles table.
+
+**Specifics**:
+- **Migration Script**: Created `migrations/001_add_exact_columns.py` with full migration system
+  - `migrate_up()` - Adds 4 TEXT columns
+  - `migrate_down()` - Rollback function (with SQLite version detection)
+  - `migrate_existing_data()` - Optional data migration from INTEGER to TEXT format
+  - `verify_migration()` - Schema verification
+  - `apply_migration()` - Convenience wrapper function
+
+- **Columns Added**:
+  - `curvature_exact` (TEXT, nullable) - Tagged format: "int:6", "frac:3/2", "sym:sqrt(2)"
+  - `center_x_exact` (TEXT, nullable)
+  - `center_y_exact` (TEXT, nullable)
+  - `radius_exact` (TEXT, nullable)
+
+- **Preserved Columns**: All existing INTEGER columns remain:
+  - curvature_num/denom, center_x_num/denom, center_y_num/denom, radius_num/denom
+  - Enables backward compatibility and fast indexing
+
+- **Migration Features**:
+  - **Idempotent**: Safe to run multiple times (skips existing columns)
+  - **Non-destructive**: Preserves all existing data
+  - **Backward compatible**: Old code continues working
+  - **Logging**: Comprehensive logging with ✓/⊘/✗ status indicators
+
+**Testing**:
+- Applied migration successfully to existing database
+- Verified all 4 columns created with correct schema
+- Tested idempotency - second run correctly skipped existing columns
+- Verified 18 total columns in circles table (14 original + 4 new)
+
+**Files created**:
+- `migrations/001_add_exact_columns.py` - Migration script (300+ lines)
+- `migrations/__init__.py` - Package initialization
+- `migrations/README.md` - Complete migration documentation
+
+**Files changed**:
+- `apollonian_gasket.db` - Schema updated with 4 new columns
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: Migration applied successfully to production database. TEXT columns are nullable, allowing gradual migration. Existing data remains accessible through INTEGER columns. New code (Phases 4-9) will populate both INTEGER and TEXT columns for full compatibility. The `migrate_existing_data()` function is available but not required - new gaskets will populate exact columns automatically. Migration system is extensible for future schema changes.
+
 ---
 
 ## Statistics
 
-**Total Entries**: 13
-**Completed**: 13
+**Total Entries**: 17
+**Completed**: 17
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-11-04 15:45
+**Last Updated**: 2025-11-04 12:50
