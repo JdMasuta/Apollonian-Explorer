@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db import Gasket, Circle
 from core.gasket_generator import generate_apollonian_gasket
+from core.diophantine_generator import generate_apollonian_gasket as generate_diophantine_gasket
 from core.circle_math import fraction_to_tuple
 from schemas import GasketResponse, CircleResponse
 
@@ -174,6 +175,7 @@ class GasketService:
 
         # Generate gasket using core algorithm
         circles_data = list(
+            #generate_diophantine_gasket(fracs, max_depth, stream=False)
             generate_apollonian_gasket(fracs, max_depth, stream=False)
         )
 

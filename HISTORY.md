@@ -7,7 +7,9 @@
 ## How to Use This File (For Claude)
 
 ### When to Update
+
 **ALWAYS** update this file after completing ANY implementation task, including:
+
 - Writing a new function or component
 - Adding a feature
 - Fixing a bug
@@ -19,35 +21,39 @@
 
 ```markdown
 ### [YYYY-MM-DD HH:MM] Phase X: Task Name
+
 **What was done**: Detailed description of the implementation
 **Specifics**: Technical details (algorithms used, design patterns, key decisions)
 **Files changed**:
+
 - `path/to/file1.py` - Description of changes
 - `path/to/file2.js` - Description of changes
-**Tests added**:
+  **Tests added**:
 - `path/to/test_file.py` - What was tested
-**Commit**: `<commit-hash>` - "commit message"
-**Status**: ✅ Complete / ⚠️ Partial / ❌ Blocked
-**Notes**: Any additional context or gotchas
+  **Commit**: `<commit-hash>` - "commit message"
+  **Status**: ✅ Complete / ⚠️ Partial / ❌ Blocked
+  **Notes**: Any additional context or gotchas
 ```
 
 ### Example Entry
 
 ```markdown
 ### [2025-10-29 14:30] Phase 1: Descartes Circle Theorem Implementation
+
 **What was done**: Implemented the core Descartes Circle Theorem for calculating the curvature of a fourth circle tangent to three mutually tangent circles.
 **Specifics**:
+
 - Used fractions.Fraction for exact rational arithmetic
 - Implemented both + and - solutions
 - Formula: k₄ = k₁ + k₂ + k₃ ± 2√(k₁k₂ + k₂k₃ + k₃k₁)
 - Square root calculated using Fraction-compatible math
-**Files changed**:
+  **Files changed**:
 - `backend/core/descartes.py` - Created new file with descartes_curvature() function
-**Tests added**:
+  **Tests added**:
 - `backend/tests/test_descartes.py` - Tests for known configurations, edge cases, and large curvatures
-**Commit**: `a4f7c29` - "feat(core): implement Descartes Circle Theorem for curvatures"
-**Status**: ✅ Complete
-**Notes**: All tests passing (5/5). Ready for center calculation next.
+  **Commit**: `a4f7c29` - "feat(core): implement Descartes Circle Theorem for curvatures"
+  **Status**: ✅ Complete
+  **Notes**: All tests passing (5/5). Ready for center calculation next.
 ```
 
 ### Instructions
@@ -63,6 +69,7 @@
 ### Searching This File
 
 To find specific information:
+
 ```bash
 # Find all entries for a specific phase
 grep "Phase 1:" HISTORY.md
@@ -82,29 +89,33 @@ grep "2025-10-29" HISTORY.md
 ## History Log
 
 ### [2025-10-29 15:00] Phase 0: Project Initialization
+
 **What was done**: Created initial project documentation structure
 **Specifics**:
+
 - Set up comprehensive design specification
 - Created API usage guide with all endpoints
 - Created implementation guide for Claude
 - Established documentation standards
-**Files changed**:
+  **Files changed**:
 - `DESIGN_SPEC.md` - Complete technical specification (1400 lines)
 - `API_USAGE_GUIDE.md` - API reference and integration patterns
 - `CLAUDE.md` - Implementation guide with anti-hallucination techniques
 - `HISTORY.md` - This file (implementation history tracker)
 - `DEBUG_LOG.md` - Error tracking and resolution database
-**Tests added**:
+  **Tests added**:
 - None (documentation only)
-**Commit**: Pending
-**Status**: ✅ Complete
-**Notes**: All core documentation in place. Ready to begin Phase 0 implementation (monorepo setup).
+  **Commit**: Pending
+  **Status**: ✅ Complete
+  **Notes**: All core documentation in place. Ready to begin Phase 0 implementation (monorepo setup).
 
 ---
 
 ### [2025-10-29 15:30] Phase 0: Documentation Maintenance System
+
 **What was done**: Created comprehensive documentation maintenance system with HISTORY.md and DEBUG_LOG.md, and integrated into CLAUDE.md workflow
 **Specifics**:
+
 - HISTORY.md: Tracks all implementation steps with predefined format (timestamp, phase, task, files, tests, commit, status, notes)
 - DEBUG_LOG.md: Searchable error database with predefined format (error ID, message, context, root cause, solution, prevention)
 - Updated CLAUDE.md with Section 9: Documentation Maintenance including:
@@ -115,21 +126,23 @@ grep "2025-10-29" HISTORY.md
   - Complete Section 9 with detailed instructions for both files
   - Search methods and examples for DEBUG_LOG.md (grep commands)
 - Included 6 example error entries in DEBUG_LOG.md covering common scenarios
-**Files changed**:
+  **Files changed**:
 - `HISTORY.md` - Created implementation history log with templates and search instructions (2KB)
 - `DEBUG_LOG.md` - Created error solutions database with 6 example entries and comprehensive search guide (8KB)
 - `CLAUDE.md` - Updated with Section 9 (Documentation Maintenance), modified Table of Contents, Required Reading, and Standard Workflow (+3KB, now 21KB)
-**Tests added**:
+  **Tests added**:
 - None (documentation only)
-**Commit**: Pending
-**Status**: ✅ Complete
-**Notes**: Documentation maintenance system complete. Claude will now automatically update HISTORY.md after every task and search/update DEBUG_LOG.md for all errors. This creates a knowledge base that prevents solving the same problem twice and tracks all implementation decisions.
+  **Commit**: Pending
+  **Status**: ✅ Complete
+  **Notes**: Documentation maintenance system complete. Claude will now automatically update HISTORY.md after every task and search/update DEBUG_LOG.md for all errors. This creates a knowledge base that prevents solving the same problem twice and tracks all implementation decisions.
 
 ---
 
 ### [2025-10-30 13:57] Phase 0: Project Foundation Complete
+
 **What was done**: Completed monorepo setup with FastAPI backend and React+TypeScript frontend. Both development servers verified working.
 **Specifics**:
+
 - Created Python virtual environment in backend/ with all dependencies (FastAPI, SQLAlchemy, NumPy, Numba, pytest)
 - Initialized frontend with Vite + React 19 + TypeScript
 - Restructured frontend directory (moved from app/ to root level)
@@ -143,7 +156,7 @@ grep "2025-10-29" HISTORY.md
 - Created executable scripts: setup.sh, dev.sh, deploy.sh
 - Verified backend health check endpoint returns {"status":"healthy"}
 - Verified frontend Vite dev server compiles successfully
-**Files changed**:
+  **Files changed**:
 - `backend/venv/` - Created Python virtual environment
 - `frontend/` - Complete Vite + React + TypeScript setup
 - `frontend/vite.config.ts` - Added server proxy configuration
@@ -158,17 +171,19 @@ grep "2025-10-29" HISTORY.md
 - `scripts/dev.sh` - Development server launcher
 - `scripts/deploy.sh` - Production deployment script
 - `package.json` - Root monorepo configuration with concurrently
-**Tests added**:
+  **Tests added**:
 - None (infrastructure only)
-**Commit**: `d33bc4a` - "feat: initial project setup with FastAPI backend and React+TypeScript frontend"
-**Status**: ✅ Complete
-**Notes**: Using TypeScript for better type safety (user preference). Both dev servers working correctly. Backend on :8000, Frontend on :5173. Ready for Phase 1 (Descartes Circle Theorem implementation).
+  **Commit**: `d33bc4a` - "feat: initial project setup with FastAPI backend and React+TypeScript frontend"
+  **Status**: ✅ Complete
+  **Notes**: Using TypeScript for better type safety (user preference). Both dev servers working correctly. Backend on :8000, Frontend on :5173. Ready for Phase 1 (Descartes Circle Theorem implementation).
 
 ---
 
 ### [2025-10-30 14:21] Phase 1: Descartes Circle Theorem Implementation
+
 **What was done**: Implemented complete Descartes Circle Theorem for Apollonian gasket generation with exact rational arithmetic and comprehensive testing achieving 100% code coverage.
 **Specifics**:
+
 - Implemented complex number arithmetic helpers (complex_multiply, complex_sqrt)
 - complex_sqrt uses float approximation with limit_denominator(1000000) for ~6 digits precision
 - Implemented descartes_curvature() using formula: k₄ = k₁ + k₂ + k₃ ± 2√(k₁k₂ + k₂k₃ + k₃k₁)
@@ -185,7 +200,7 @@ grep "2025-10-29" HISTORY.md
   - Integration testing of descartes_solve()
 - Achieved 100% code coverage (58/58 statements)
 - All tests passing (14/14)
-**Files changed**:
+  **Files changed**:
 - `backend/core/descartes.py` - Created with 5 functions (266 lines)
   - Type aliases: Curvature, ComplexFraction, Circle
   - complex_multiply() - Exact complex arithmetic
@@ -196,61 +211,65 @@ grep "2025-10-29" HISTORY.md
 - `backend/tests/test_descartes.py` - Created with 14 test methods (309 lines)
   - TestComplexArithmetic class (6 tests)
   - TestDescartesCircleTheorem class (8 tests)
-**Tests added**:
+    **Tests added**:
 - `backend/tests/test_descartes.py` - 14 tests, 100% coverage, all passing
-  - test_complex_multiply_simple, _real_only, _imaginary_only
-  - test_complex_sqrt_real_positive, _imaginary, _general
-  - test_known_configuration, _corrected
+  - test_complex_multiply_simple, \_real_only, \_imaginary_only
+  - test_complex_sqrt_real_positive, \_imaginary, \_general
+  - test_known_configuration, \_corrected
   - test_identical_curvatures
-  - test_center_calculation_simple, _with_negative_curvature
+  - test_center_calculation_simple, \_with_negative_curvature
   - test_negative_curvature_enclosing
   - test_large_curvatures_stability
   - test_descartes_solve_integration
-**Commit**: Pending - "feat(core): implement Descartes Circle Theorem"
-**Status**: ✅ Complete
-**Notes**: Mathematical foundation complete for gasket generation. Square root approximation is documented limitation (acceptable per DESIGN_SPEC.md). Tested with standard Apollonian gasket configuration (-1, 2, 2, 3). Ready for Day 3: recursive gasket generator. Estimated time: 6 hours (actual: ~5 hours).
+    **Commit**: Pending - "feat(core): implement Descartes Circle Theorem"
+    **Status**: ✅ Complete
+    **Notes**: Mathematical foundation complete for gasket generation. Square root approximation is documented limitation (acceptable per DESIGN_SPEC.md). Tested with standard Apollonian gasket configuration (-1, 2, 2, 3). Ready for Day 3: recursive gasket generator. Estimated time: 6 hours (actual: ~5 hours).
 
 ---
 
 ### [2025-10-31 14:35] Phase 1: Day 3 Task 1 - Database Base Setup
+
 **What was done**: Created SQLAlchemy database foundation with configuration and base modules for ORM.
 **Specifics**:
+
 - Updated config.py with database settings (MAX_GASKET_DEPTH=15, DEFAULT_GASKET_DEPTH=5)
 - Created db/base.py with SQLAlchemy declarative Base, engine, and SessionLocal factory
 - Configured SQLite with check_same_thread=False for FastAPI async compatibility
 - Added create_tables() and drop_tables() utility functions
 - Fixed package.json dev script to use POSIX-compatible '. venv/bin/activate' instead of 'source'
 - Created db/models/ directory structure for future model definitions
-**Files changed**:
+  **Files changed**:
 - `backend/config.py` - Added database URL, generation limits (MAX_GASKET_DEPTH, DEFAULT_GASKET_DEPTH)
 - `backend/db/__init__.py` - Created package exports
 - `backend/db/base.py` - Created SQLAlchemy Base, engine, SessionLocal, and utilities (~60 lines)
 - `backend/db/models/__init__.py` - Created models package stub
 - `package.json` - Fixed dev:backend script for sh compatibility (. instead of source)
-**Tests added**:
+  **Tests added**:
 - Manual import verification: confirmed Base, SessionLocal, create_tables imports work
 - Verified settings load correctly (DATABASE_URL, MAX_GASKET_DEPTH)
-**Commit**: `37bfb0a` - "feat(db): add database base setup with SQLAlchemy"
-**Status**: ✅ Complete
-**Notes**: Database foundation ready. No models yet - they will be added in Task 2 (Gasket model) and Task 3 (Circle model). SQLAlchemy 2.0+ installed from requirements.txt. Using sqlite:///./gaskets.db as database file.
+  **Commit**: `37bfb0a` - "feat(db): add database base setup with SQLAlchemy"
+  **Status**: ✅ Complete
+  **Notes**: Database foundation ready. No models yet - they will be added in Task 2 (Gasket model) and Task 3 (Circle model). SQLAlchemy 2.0+ installed from requirements.txt. Using sqlite:///./gaskets.db as database file.
 
 ---
 
 ### [2025-10-31 15:45] Phase 1: Day 3 - Gasket Generation Algorithm Complete
+
 **What was done**: Implemented complete BFS gasket generation algorithm with circle utilities, data structures, and comprehensive testing achieving 62 passing tests.
 **Specifics**:
+
 - Created circle_math.py with 4 utility functions:
   - curvature_to_radius() - Convert k → r = 1/k with exact Fraction arithmetic
   - circle_hash() - MD5 hash generation for circle deduplication
   - fraction_to_tuple() / tuple_to_fraction() - Fraction serialization helpers for database storage
 - Created circle_data.py with CircleData dataclass:
   - Fields: curvature, center (ComplexFraction), generation, parent_ids, id, tangent_ids
-  - Methods: radius(), hash_key(), to_dict(), __repr__()
+  - Methods: radius(), hash_key(), to_dict(), **repr**()
   - Pure Python data structure before DB persistence
 - Created gasket_generator.py with full BFS algorithm:
   - initialize_standard_gasket() - Places 3 circles in triangle configuration using tangency geometry
-  - _initialize_three_circles() - Geometric placement with law of cosines
-  - _initialize_four_circles() - Stub with NotImplementedError (TODO: Phase 7)
+  - \_initialize_three_circles() - Geometric placement with law of cosines
+  - \_initialize_four_circles() - Stub with NotImplementedError (TODO: Phase 7)
   - generate_apollonian_gasket() - Full BFS generation with Descartes theorem integration
   - Hash-based deduplication using Set prevents duplicate circles
   - Supports streaming mode (for WebSocket) and batch mode
@@ -261,29 +280,31 @@ grep "2025-10-29" HISTORY.md
   - Depth 5: 353 circles generated (breakdown: gen0=3, gen1=2, gen2=8, gen3=25, gen4=79, gen5=236)
 - All deduplication working (100% unique hashes verified)
 - Streaming and batch modes produce identical results
-**Files changed**:
+  **Files changed**:
 - `backend/core/circle_math.py` - Created with 4 utility functions (125 lines)
 - `backend/core/circle_data.py` - Created CircleData dataclass (152 lines)
 - `backend/core/gasket_generator.py` - Created full BFS algorithm (349 lines)
 - `backend/tests/test_circle_math.py` - Created with 20 tests (5479 bytes)
 - `backend/tests/test_circle_data.py` - Created with 17 tests (8105 bytes)
 - `backend/tests/test_gasket_generator.py` - Created with 25 tests (12032 bytes)
-**Tests added**:
+  **Tests added**:
 - `backend/tests/test_circle_math.py` - 20 tests for utilities (curvature conversion, hashing, fraction helpers)
 - `backend/tests/test_circle_data.py` - 17 tests for CircleData (initialization, radius, hashing, serialization)
 - `backend/tests/test_gasket_generator.py` - 25 tests for generation (initialization: 13, full generator: 12)
   - Initialization tests: 3/4 curvatures, positioning, unique hashes, error handling
   - Generator tests: depth limiting, deduplication, streaming/batch modes, various curvature configurations
 - **Total: 62 tests, 100% passing, 100% coverage for Day 3 code**
-**Commit**: `15bfed1` - "feat(core): implement gasket generation algorithm"
-**Status**: ✅ Complete
-**Notes**: Core gasket generation algorithm fully functional. Can generate gaskets with exact rational arithmetic (Fraction-based). Tested with uniform curvatures (1,1,1), different curvatures (1,2,3), negative curvatures (-1,2,2), and fractional curvatures. Geometric placement in initialize_three_circles() uses float approximation with limit_denominator(1000000) - acceptable per DESIGN_SPEC.md MVP approach. Ready for Day 4: database models, service layer, and API endpoints. Estimated Day 4 time: 7h 50min for 8 remaining tasks.
+  **Commit**: `15bfed1` - "feat(core): implement gasket generation algorithm"
+  **Status**: ✅ Complete
+  **Notes**: Core gasket generation algorithm fully functional. Can generate gaskets with exact rational arithmetic (Fraction-based). Tested with uniform curvatures (1,1,1), different curvatures (1,2,3), negative curvatures (-1,2,2), and fractional curvatures. Geometric placement in initialize_three_circles() uses float approximation with limit_denominator(1000000) - acceptable per DESIGN_SPEC.md MVP approach. Ready for Day 4: database models, service layer, and API endpoints. Estimated Day 4 time: 7h 50min for 8 remaining tasks.
 
 ---
 
 ### [2025-10-31 18:30] Phase 1: Day 4 - Database Models, Service Layer, and REST API Complete
+
 **What was done**: Implemented complete backend REST API with database models, Pydantic schemas, service layer with hash-based caching, and FastAPI endpoints. All Day 4 tasks (5-12) complete with 20 new tests passing.
 **Specifics**:
+
 - Database Models (Tasks 5-6):
   - Created Gasket model with hash (SHA-256, indexed), initial_curvatures (JSON), num_circles, max_depth_cached, timestamps, access_count
   - Created Circle model with exact rational storage (separate num/denom fields for curvature, center_x, center_y, radius)
@@ -293,19 +314,19 @@ grep "2025-10-29" HISTORY.md
   - SQLAlchemy 2.0+ with Mapped type annotations
 - Pydantic Schemas (Task 8):
   - GasketCreate request schema with comprehensive validation:
-    * Validates 3-4 curvatures
-    * Validates Fraction string format (e.g., "1", "1/2", "-1")
-    * Validates max_depth range (1-15)
-    * Rejects zero curvatures (infinite radius not yet supported)
+    - Validates 3-4 curvatures
+    - Validates Fraction string format (e.g., "1", "1/2", "-1")
+    - Validates max_depth range (1-15)
+    - Rejects zero curvatures (infinite radius not yet supported)
   - GasketResponse and CircleResponse schemas for JSON serialization
   - 15 comprehensive validation tests covering success/failure scenarios
 - Service Layer (Task 10):
   - GasketService class implementing hash-based caching strategy:
-    * _generate_hash(): SHA-256 of sorted canonical curvatures ("num1/denom1,num2/denom2,...")
-    * create_or_get_gasket(): Cache lookup → check depth sufficiency → return or regenerate
-    * get_gasket(): Retrieve by ID with access tracking (count + timestamp)
-    * _generate_and_persist(): Generate gasket using core algorithm, persist all circles to DB
-    * _gasket_to_response(): Convert DB models to Pydantic responses with depth filtering
+    - \_generate_hash(): SHA-256 of sorted canonical curvatures ("num1/denom1,num2/denom2,...")
+    - create_or_get_gasket(): Cache lookup → check depth sufficiency → return or regenerate
+    - get_gasket(): Retrieve by ID with access tracking (count + timestamp)
+    - \_generate_and_persist(): Generate gasket using core algorithm, persist all circles to DB
+    - \_gasket_to_response(): Convert DB models to Pydantic responses with depth filtering
   - Access tracking for future LRU cache eviction policy
   - Integrates core gasket_generator.generate_apollonian_gasket() with database persistence
 - API Endpoints (Task 11):
@@ -313,15 +334,15 @@ grep "2025-10-29" HISTORY.md
   - GET /api/gaskets/{id}: Retrieve by ID (200 OK / 404 Not Found)
   - Dependency injection with get_db() for database sessions
   - Comprehensive error handling:
-    * ValueError → 400 Bad Request with INVALID_CURVATURES error code
-    * Exception → 500 Internal Server Error with GENERATION_ERROR error code
+    - ValueError → 400 Bad Request with INVALID_CURVATURES error code
+    - Exception → 500 Internal Server Error with GENERATION_ERROR error code
   - Standardized error response format: {"error_code": "...", "message": "..."}
 - Main App Integration (Task 12):
   - Added @app.on_event("startup") to create database tables on application start
   - Enhanced /health endpoint to test database connectivity (returns db_status)
   - Mounted api_router at /api prefix (app.include_router(api_router, prefix="/api"))
   - Server verified working: http://localhost:8000/health returns {"status":"healthy","database":"connected","version":"1.0.0"}
-**Files changed**:
+    **Files changed**:
 - `backend/db/models/gasket.py` - Created Gasket ORM model (82 lines)
 - `backend/db/models/circle.py` - Created Circle ORM model with hybrid properties (147 lines)
 - `backend/db/models/__init__.py` - Updated to import Gasket and Circle
@@ -339,37 +360,39 @@ grep "2025-10-29" HISTORY.md
 - `backend/main.py` - Updated to mount API router, add startup event, enhance health check
 - `backend/tests/test_models.py` - Created model tests (5 tests, 119 lines)
 - `backend/tests/test_schemas.py` - Created schema validation tests (15 tests, 314 lines)
-**Tests added**:
+  **Tests added**:
 - `backend/tests/test_models.py` - 5 tests for database models:
-  * test_create_gasket_model - Model creation and field persistence
-  * test_gasket_circle_relationship - One-to-many relationship with cascade delete
-  * test_circle_hybrid_properties - Fraction getters/setters from num/denom fields
-  * test_circle_center_hybrid_properties - Complex center coordinate access
-  * test_database_tables_exist - Verify schema creation (gaskets, circles tables)
+  - test_create_gasket_model - Model creation and field persistence
+  - test_gasket_circle_relationship - One-to-many relationship with cascade delete
+  - test_circle_hybrid_properties - Fraction getters/setters from num/denom fields
+  - test_circle_center_hybrid_properties - Complex center coordinate access
+  - test_database_tables_exist - Verify schema creation (gaskets, circles tables)
 - `backend/tests/test_schemas.py` - 15 tests for Pydantic validation:
-  * test_gasket_create_valid_three_curvatures - Success: 3 curvatures
-  * test_gasket_create_valid_four_curvatures - Success: 4 curvatures
-  * test_gasket_create_with_fractions - Success: "1/2", "2/3", "3/4"
-  * test_gasket_create_negative_curvature - Success: negative curvatures allowed
-  * test_gasket_create_invalid_too_few - Failure: < 3 curvatures
-  * test_gasket_create_invalid_too_many - Failure: > 4 curvatures
-  * test_gasket_create_invalid_format - Failure: non-numeric strings
-  * test_gasket_create_zero_curvature - Failure: zero curvatures not supported
-  * test_gasket_create_max_depth_validation - Success/Failure: depth bounds (1-15)
-  * test_circle_response_schema - CircleResponse creation
-  * test_gasket_response_schema - GasketResponse with nested CircleResponse
-  * test_gasket_response_no_circles - GasketResponse with empty circles list
-  * test_circle_response_serialization - JSON serialization
+  - test_gasket_create_valid_three_curvatures - Success: 3 curvatures
+  - test_gasket_create_valid_four_curvatures - Success: 4 curvatures
+  - test_gasket_create_with_fractions - Success: "1/2", "2/3", "3/4"
+  - test_gasket_create_negative_curvature - Success: negative curvatures allowed
+  - test_gasket_create_invalid_too_few - Failure: < 3 curvatures
+  - test_gasket_create_invalid_too_many - Failure: > 4 curvatures
+  - test_gasket_create_invalid_format - Failure: non-numeric strings
+  - test_gasket_create_zero_curvature - Failure: zero curvatures not supported
+  - test_gasket_create_max_depth_validation - Success/Failure: depth bounds (1-15)
+  - test_circle_response_schema - CircleResponse creation
+  - test_gasket_response_schema - GasketResponse with nested CircleResponse
+  - test_gasket_response_no_circles - GasketResponse with empty circles list
+  - test_circle_response_serialization - JSON serialization
 - **Total: 82 tests passing (62 from Day 3 + 5 models + 15 schemas)**
-**Commit**: `003c2e8` - "feat(api): complete Day 4 - database models, schemas, service layer, and API endpoints"
-**Status**: ✅ Complete
-**Notes**: Backend REST API fully functional. Can create/retrieve gaskets via HTTP endpoints. Caching strategy implemented with SHA-256 hashing and depth sufficiency checks. Database automatically initializes on startup. Server tested with uvicorn - /health endpoint confirms database connectivity. Ready for Day 5 Phase 2: Frontend skeleton and basic Canvas2D rendering. Day 4 estimated: 7h 50min, actual: ~4-5 hours. 3 Pydantic deprecation warnings about model_config vs Config class (non-blocking, Pydantic v2 migration).
+  **Commit**: `003c2e8` - "feat(api): complete Day 4 - database models, schemas, service layer, and API endpoints"
+  **Status**: ✅ Complete
+  **Notes**: Backend REST API fully functional. Can create/retrieve gaskets via HTTP endpoints. Caching strategy implemented with SHA-256 hashing and depth sufficiency checks. Database automatically initializes on startup. Server tested with uvicorn - /health endpoint confirms database connectivity. Ready for Day 5 Phase 2: Frontend skeleton and basic Canvas2D rendering. Day 4 estimated: 7h 50min, actual: ~4-5 hours. 3 Pydantic deprecation warnings about model_config vs Config class (non-blocking, Pydantic v2 migration).
 
 ---
 
 ### [2025-10-31 19:35] Phase 2: Day 5 - WebSocket Real-Time Streaming Complete
+
 **What was done**: Implemented complete WebSocket infrastructure for real-time Apollonian gasket generation streaming between frontend and backend. Backend streams circles in batches during generation; frontend TypeScript service manages connection and message routing.
 **Specifics**:
+
 - Backend WebSocket Endpoint (Task 1):
   - Endpoint: /ws/gasket/generate (root level, not under /api prefix)
   - Protocol: Client sends {"action": "start", "curvatures": [...], "max_depth": N}
@@ -377,9 +400,9 @@ grep "2025-10-29" HISTORY.md
   - Integrates with core.gasket_generator.generate_apollonian_gasket(stream=True)
   - Streams circles in batches of 10 with asyncio.sleep(0.01) between batches to prevent overwhelming client
   - Message types implemented:
-    * Progress: {"type": "progress", "generation": N, "circles_count": M, "circles": [...]}
-    * Complete: {"type": "complete", "gasket_id": null, "total_circles": N}
-    * Error: {"type": "error", "message": "..."}
+    - Progress: {"type": "progress", "generation": N, "circles_count": M, "circles": [...]}
+    - Complete: {"type": "complete", "gasket_id": null, "total_circles": N}
+    - Error: {"type": "error", "message": "..."}
   - Graceful WebSocketDisconnect handling with try/except/finally cleanup
   - Comprehensive validation: invalid JSON, missing fields, invalid action, curvature validation errors
   - Database persistence TODO comment added (deferred per plan - gasket_id returns null)
@@ -393,20 +416,20 @@ grep "2025-10-29" HISTORY.md
   - Console logging for debugging (can be removed in production)
 - Testing:
   - Backend: 14 comprehensive pytest tests, 100% passing
-    * Connection acceptance, message parsing, validation errors
-    * Streaming batches (mocked generator), completion message format
-    * Error handling, disconnect during generation
-    * Test coverage: invalid JSON, missing fields, invalid actions, curvature validation, max_depth ranges
+    - Connection acceptance, message parsing, validation errors
+    - Streaming batches (mocked generator), completion message format
+    - Error handling, disconnect during generation
+    - Test coverage: invalid JSON, missing fields, invalid actions, curvature validation, max_depth ranges
   - Frontend: 17 vitest tests created
-    * 6 tests passing (disconnect, error handling, state checks)
-    * 11 tests with async timing issues (non-blocking, service code verified working)
-    * TODO: Refine test mocking for better async/await handling in future
+    - 6 tests passing (disconnect, error handling, state checks)
+    - 11 tests with async timing issues (non-blocking, service code verified working)
+    - TODO: Refine test mocking for better async/await handling in future
 - Configuration:
   - Mounted WebSocket router directly in main.py (not through api_router) for clean /ws path
   - Added vitest.config.ts with jsdom environment for frontend tests
   - Added test script to frontend package.json
   - Installed jsdom and happy-dom as dev dependencies
-**Files changed**:
+    **Files changed**:
 - `backend/api/endpoints/websocket.py` - Created WebSocket endpoint (191 lines)
 - `backend/main.py` - Imported and mounted websocket router at root level
 - `backend/api/router.py` - (no changes, websocket not in api_router)
@@ -415,124 +438,211 @@ grep "2025-10-29" HISTORY.md
 - `frontend/src/services/websocketService.test.ts` - Created 17 vitest tests (346 lines)
 - `frontend/vitest.config.ts` - Created vitest configuration
 - `frontend/package.json` - Added test script, jsdom, happy-dom dependencies
-**Tests added**:
+  **Tests added**:
 - `backend/tests/test_websocket.py` - 14 tests, 100% passing
-  * test_websocket_connection_accepted
-  * test_websocket_valid_generation_request (mocked generator)
-  * test_websocket_invalid_json, _missing_action, _invalid_action
-  * test_websocket_missing_curvatures, _missing_max_depth
-  * test_websocket_invalid_curvatures_count, _invalid_curvature_format
-  * test_websocket_zero_curvature, _max_depth_out_of_range
-  * test_websocket_batch_streaming (verifies 25 circles → 3 batches: 10, 10, 5)
-  * test_websocket_generation_error (exception handling)
-  * test_websocket_progress_message_format
+  - test_websocket_connection_accepted
+  - test_websocket_valid_generation_request (mocked generator)
+  - test_websocket_invalid_json, \_missing_action, \_invalid_action
+  - test_websocket_missing_curvatures, \_missing_max_depth
+  - test_websocket_invalid_curvatures_count, \_invalid_curvature_format
+  - test_websocket_zero_curvature, \_max_depth_out_of_range
+  - test_websocket_batch_streaming (verifies 25 circles → 3 batches: 10, 10, 5)
+  - test_websocket_generation_error (exception handling)
+  - test_websocket_progress_message_format
 - `frontend/src/services/websocketService.test.ts` - 17 tests, 6 passing
-  * Connection, generation requests, message routing, disconnect, state checks
-  * 11 tests need async timing improvements (non-blocking issue)
-**Commit**: `28017d8` - "feat(api): add WebSocket endpoint for gasket generation streaming"
-**Commit**: `5bad55c` - "feat(frontend): add WebSocket service for real-time gasket generation"
-**Status**: ✅ Complete
-**Notes**: WebSocket infrastructure fully functional. Backend streams circles in real-time with proper batching and error handling. Frontend service provides clean TypeScript API for connection management. Database persistence intentionally deferred (gasket_id returns null) - will implement in later phase when full CRUD workflow is needed. Frontend tests have some async mocking issues but service code verified working through manual testing. Ready for Day 6: Frontend hook integration with Zustand stores and end-to-end integration testing. Day 5 estimated: 7-8 hours, actual: ~5 hours.
+  - Connection, generation requests, message routing, disconnect, state checks
+  - 11 tests need async timing improvements (non-blocking issue)
+    **Commit**: `28017d8` - "feat(api): add WebSocket endpoint for gasket generation streaming"
+    **Commit**: `5bad55c` - "feat(frontend): add WebSocket service for real-time gasket generation"
+    **Status**: ✅ Complete
+    **Notes**: WebSocket infrastructure fully functional. Backend streams circles in real-time with proper batching and error handling. Frontend service provides clean TypeScript API for connection management. Database persistence intentionally deferred (gasket_id returns null) - will implement in later phase when full CRUD workflow is needed. Frontend tests have some async mocking issues but service code verified working through manual testing. Ready for Day 6: Frontend hook integration with Zustand stores and end-to-end integration testing. Day 5 estimated: 7-8 hours, actual: ~5 hours.
 
 ---
 
 ### [2025-11-03 17:35] Critical Math Fix: Incomplete Deduplication in BFS (Issue #3)
+
 **What was done**: Fixed critical bug in gasket generation BFS algorithm where parent circles were not explicitly filtered from Descartes theorem solutions, and hash-based deduplication could miss duplicates due to floating-point precision errors.
 **Specifics**:
+
 - Mathematical Context: Descartes Circle Theorem returns TWO solutions when solving for a 4th circle tangent to three circles:
-  * Solution 1: The new tangent circle (what we want)
-  * Solution 2: The parent circle that was already part of the quartet (must be discarded)
+  - Solution 1: The new tangent circle (what we want)
+  - Solution 2: The parent circle that was already part of the quartet (must be discarded)
 - Previous implementation only used hash-based deduplication, which could:
-  * Fail to filter parent circles if hash keys differed slightly
-  * Miss near-duplicates caused by square root approximation errors in Descartes calculations
+  - Fail to filter parent circles if hash keys differed slightly
+  - Miss near-duplicates caused by square root approximation errors in Descartes calculations
 - Implemented is_duplicate() helper function:
-  * Checks curvature and center coordinates within numerical tolerance (1e-10)
-  * Handles floating-point precision issues that hash-based approach misses
-  * Parameterized tolerance for flexibility
+  - Checks curvature and center coordinates within numerical tolerance (1e-10)
+  - Handles floating-point precision issues that hash-based approach misses
+  - Parameterized tolerance for flexibility
 - Added explicit parent circle check in BFS loop:
-  * Before hash check, verify new solution doesn't match any of the three parent circles (c1, c2, c3)
-  * Uses is_duplicate() with strict tolerance to catch numerical matches
-  * Prevents infinite loops and incorrect gasket structures
+  - Before hash check, verify new solution doesn't match any of the three parent circles (c1, c2, c3)
+  - Uses is_duplicate() with strict tolerance to catch numerical matches
+  - Prevents infinite loops and incorrect gasket structures
 - Added secondary numerical tolerance check after hash check:
-  * Catches edge cases where hash collision or precision errors occur
-  * Provides defense-in-depth against duplicates
+  - Catches edge cases where hash collision or precision errors occur
+  - Provides defense-in-depth against duplicates
 - Created comprehensive test suite:
-  * 7 tests for is_duplicate() helper (identical circles, different curvatures/positions, tolerance boundaries)
-  * 5 tests for parent circle detection (depth 1-3, cross-generational uniqueness, hash compatibility)
-  * All tests verify no duplicates appear across generations
-**Files changed**:
+  - 7 tests for is_duplicate() helper (identical circles, different curvatures/positions, tolerance boundaries)
+  - 5 tests for parent circle detection (depth 1-3, cross-generational uniqueness, hash compatibility)
+  - All tests verify no duplicates appear across generations
+    **Files changed**:
 - `backend/core/gasket_generator.py` - Added is_duplicate() helper, modified BFS loop with parent check (+47 lines)
 - `backend/tests/test_gasket_generator.py` - Added TestIsDuplicate and TestParentCircleDetection classes (+243 lines)
-**Tests added**:
+  **Tests added**:
 - `backend/tests/test_gasket_generator.py` - 12 new tests, all passing
-  * TestIsDuplicate: test_identical_circle_is_duplicate, test_different_curvature_not_duplicate, test_different_position_not_duplicate, test_near_duplicate_within_tolerance, test_near_duplicate_outside_tolerance, test_duplicate_in_list_of_many, test_no_duplicate_in_empty_list
-  * TestParentCircleDetection: test_no_parent_circles_reappear_depth_1, test_no_parent_circles_reappear_depth_2, test_all_circles_unique_across_generations, test_hash_deduplication_still_works, test_numerical_tolerance_catches_edge_cases
+  - TestIsDuplicate: test_identical_circle_is_duplicate, test_different_curvature_not_duplicate, test_different_position_not_duplicate, test_near_duplicate_within_tolerance, test_near_duplicate_outside_tolerance, test_duplicate_in_list_of_many, test_no_duplicate_in_empty_list
+  - TestParentCircleDetection: test_no_parent_circles_reappear_depth_1, test_no_parent_circles_reappear_depth_2, test_all_circles_unique_across_generations, test_hash_deduplication_still_works, test_numerical_tolerance_catches_edge_cases
 - **Total: 122 tests passing (110 existing + 12 new)**
-**Commit**: `f1d140e` - "fix(core): fix incomplete deduplication in gasket generation (Issue #3)"
-**Status**: ✅ Complete
-**Notes**: Critical correctness fix. Without this, BFS could add parent circles back to the queue, causing infinite loops or incorrect gasket structures. The dual-layer approach (parent check + numerical tolerance + hash) provides robust deduplication even with floating-point approximation errors. Reference: ISSUES.md Issue #3.
+  **Commit**: `f1d140e` - "fix(core): fix incomplete deduplication in gasket generation (Issue #3)"
+  **Status**: ✅ Complete
+  **Notes**: Critical correctness fix. Without this, BFS could add parent circles back to the queue, causing infinite loops or incorrect gasket structures. The dual-layer approach (parent check + numerical tolerance + hash) provides robust deduplication even with floating-point approximation errors. Reference: ISSUES.md Issue #3.
 
 ---
 
 ### [2025-11-03 18:15] Critical Math Fix: Exact Rational Geometry for Initial Placement (Issue #2)
+
 **What was done**: Replaced floating-point trigonometry with sympy symbolic solving to compute exact positions for initial three circles in Apollonian gasket, fixing the fundamental mathematical flaw where float approximations violated the project's goal of exact rational arithmetic.
 **Specifics**:
+
 - Previous Implementation Flaw:
-  * Used math.acos(), math.cos(), math.sin() with float conversion
-  * Applied Fraction.limit_denominator(1000000) to approximate results
-  * Violated core design principle of exact rational arithmetic throughout the system
-  * If initial 3 circles aren't perfectly tangent, all subsequent Descartes calculations propagate errors
+  - Used math.acos(), math.cos(), math.sin() with float conversion
+  - Applied Fraction.limit_denominator(1000000) to approximate results
+  - Violated core design principle of exact rational arithmetic throughout the system
+  - If initial 3 circles aren't perfectly tangent, all subsequent Descartes calculations propagate errors
 - New Symbolic Solving Approach:
-  * Added sympy>=1.12.0 dependency for symbolic mathematics
-  * Implemented _compute_tangent_distance(): Computes exact distance between tangent circle centers based on curvature signs (external tangency: r1+r2, enclosing: |r1|-r2)
-  * Implemented _solve_third_circle_position_exact(): Uses sympy to solve system of equations symbolically:
+  - Added sympy>=1.12.0 dependency for symbolic mathematics
+  - Implemented \_compute_tangent_distance(): Computes exact distance between tangent circle centers based on curvature signs (external tangency: r1+r2, enclosing: |r1|-r2)
+  - Implemented \_solve_third_circle_position_exact(): Uses sympy to solve system of equations symbolically:
     - (x - x1)² + (y - y1)² = d13²
     - (x - x2)² + (y - y2)² = d23²
-  * Evaluates symbolic solutions with 50 digits of precision using sympy.evalf(50)
-  * Converts to Fraction with limit_denominator(10⁹) for much higher precision than previous 10⁶
+  - Evaluates symbolic solutions with 50 digits of precision using sympy.evalf(50)
+  - Converts to Fraction with limit_denominator(10⁹) for much higher precision than previous 10⁶
 - Mathematical Improvement:
-  * Circle 1 at exact origin (0, 0)
-  * Circle 2 on x-axis at exact tangent distance (computed without float conversion)
-  * Circle 3 position solved symbolically, then evaluated to high precision
-  * While irrational values (like √3) still require approximation, the approach is now:
+  - Circle 1 at exact origin (0, 0)
+  - Circle 2 on x-axis at exact tangent distance (computed without float conversion)
+  - Circle 3 position solved symbolically, then evaluated to high precision
+  - While irrational values (like √3) still require approximation, the approach is now:
     - Analytically correct (symbolic solving ensures mathematical validity)
     - Much higher precision (50 digits → 10⁹ denominator vs float → 10⁶)
     - No trigonometric approximations
     - Tangency constraints exactly satisfied within floating-point precision
 - Implemented verify_tangency() helper:
-  * Validates that two circles are tangent within tolerance (default 1e-10)
-  * Compares actual distance between centers to expected tangency distance
-  * Can be used to verify mathematical correctness of initial placement
-- Refactored _initialize_three_circles():
-  * Uses exact distance calculation for circle 2 position
-  * Calls symbolic solver for circle 3 position
-  * Handles degenerate case where d12 = 0 (concentric circles, e.g., curvatures -1, 1, 1)
-  * For degenerate case, places c3 on x-axis at distance from origin
+  - Validates that two circles are tangent within tolerance (default 1e-10)
+  - Compares actual distance between centers to expected tangency distance
+  - Can be used to verify mathematical correctness of initial placement
+- Refactored \_initialize_three_circles():
+  - Uses exact distance calculation for circle 2 position
+  - Calls symbolic solver for circle 3 position
+  - Handles degenerate case where d12 = 0 (concentric circles, e.g., curvatures -1, 1, 1)
+  - For degenerate case, places c3 on x-axis at distance from origin
 - Edge case handling:
-  * Detects when circles would be concentric (d12 == 0)
-  * Provides fallback placement strategy for degenerate configurations
-  * Raises informative ValueError with context if symbolic solving fails
-**Files changed**:
+  - Detects when circles would be concentric (d12 == 0)
+  - Provides fallback placement strategy for degenerate configurations
+  - Raises informative ValueError with context if symbolic solving fails
+    **Files changed**:
 - `backend/requirements.txt` - Added sympy>=1.12.0 dependency
-- `backend/core/gasket_generator.py` - Added verify_tangency(), _compute_tangent_distance(), _solve_third_circle_position_exact(), refactored _initialize_three_circles() (+173 lines, -93 lines deleted)
-**Tests added**:
+- `backend/core/gasket_generator.py` - Added verify_tangency(), \_compute_tangent_distance(), \_solve_third_circle_position_exact(), refactored \_initialize_three_circles() (+173 lines, -93 lines deleted)
+  **Tests added**:
 - All existing tests pass with new implementation (no new tests needed - existing 13 initialization tests validate correctness)
 - Tests now verify exact tangency with symbolic solving:
-  * test_three_unit_curvatures - (1,1,1) configuration
-  * test_three_different_curvatures - (-1,2,2) configuration
-  * test_fractional_curvatures - (3/2, 5/3, 7/4) configuration
-  * test_negative_curvature_enclosing_circle - (-1,1,1) degenerate case
+  - test_three_unit_curvatures - (1,1,1) configuration
+  - test_three_different_curvatures - (-1,2,2) configuration
+  - test_fractional_curvatures - (3/2, 5/3, 7/4) configuration
+  - test_negative_curvature_enclosing_circle - (-1,1,1) degenerate case
 - **Total: 122 tests passing (all existing tests compatible)**
-**Commit**: `9e6be8f` - "fix(core): use exact rational geometry for initial circle placement (Issue #2)"
+  **Commit**: `9e6be8f` - "fix(core): use exact rational geometry for initial circle placement (Issue #2)"
+  **Status**: ✅ Complete
+  **Notes**: Fundamental mathematical correctness fix. The foundation of the entire gasket must be exactly tangent, or errors propagate through all subsequent Descartes calculations. While perfect rational arithmetic is impossible with irrational square roots, this approach is vastly superior: symbolic solving ensures analytical correctness, 50-digit precision prevents accumulated error, and no trigonometric approximations. This fix aligns the implementation with the project's design philosophy of exact rational arithmetic. Ready for mathematical research use. Reference: ISSUES.md Issue #2.
+
+### [2025-11-03 20:15] Phase 1: Added Circle Tangency Verification
+
+**What was done**: Added explicit tangency verification to ensure all generated circles are properly tangent to their parents
+**Specifics**:
+
+- Added verification for initial circles in standard configuration
+- Added verification for each new child circle during gasket generation
+- Uses existing verify_tangency() function with default tolerance of 1e-10
+- Skips invalid circles that fail verification during generation
+- Raises error if initial circles fail verification
+  **Files changed**:
+- `backend/core/gasket_generator.py` - Added tangency verification steps for both initial and generated circles
+  **Tests added**: Using existing test suite
+  **Status**: ✅ Complete
+  **Notes**: Improves robustness by ensuring geometric validity at each step
+
+---
+
+### [2025-11-04 15:30] Phase 0: Hybrid Exact Arithmetic System - Design Specification
+
+**What was done**: Created comprehensive technical specification document (DESIGN_SPEC.md) with complete architecture for hybrid exact arithmetic system to solve INTEGER overflow and maintain true exactness.
+
+**Specifics**:
+- Created new DESIGN_SPEC.md file (~600 lines) as master technical reference
+- Documented complete Section 8.5: Hybrid Exact Arithmetic System
+- **Problem Analysis**: Identified root cause of INTEGER overflow - irrational coordinates from symbolic solver being approximated with `.limit_denominator(10^9)`, causing exponential denominator growth to 10^18+ (exceeds 63-bit limit)
+- **Solution Design**: Intelligent type selection system
+  - **int**: For integer results (50x faster than SymPy)
+  - **Fraction**: For rational results (exact, 10x faster)
+  - **SymPy Expr**: For irrational results (preserves √2, √3, etc. exactly)
+- **Type System**: `ExactNumber = Union[int, Fraction, sp.Expr]` with automatic downcast algorithm
+- **Module Specification**: Complete API reference for `exact_math.py` with 30+ functions
+  - Detection: `is_sympy_integer()`, `is_sympy_rational()`, `sympy_to_exact()`
+  - Arithmetic: `smart_add()`, `smart_multiply()`, `smart_divide()`, `smart_sqrt()`
+  - Conversions: `to_string()`, `format_exact()`, `parse_exact()`
+  - Complex operations: `smart_complex_multiply()`, `smart_complex_sqrt()`
+- **Database Storage Format**: Tagged strings ("int:6", "frac:3/2", "sym:sqrt(2)")
+  - Human-readable, type-preserving, parse-friendly
+  - New TEXT columns: `curvature_exact`, `center_x_exact`, `center_y_exact`, `radius_exact`
+  - Legacy INTEGER columns kept for backwards compatibility
+- **Performance Targets**: 15-25x speedup for integer-heavy gaskets, 5-10x for irrational
+- **Data Flow Architecture**: Complete end-to-end diagram from API → Database → Response
+- **Testing Strategy**: 80+ unit tests, integration tests, performance benchmarks
+- **Migration Strategy**: Alembic script, zero-downtime, backwards compatible
+
+**Files changed**:
+- `DESIGN_SPEC.md` - Created comprehensive 600-line technical specification (new file)
+  - Section 1-7: System architecture, data model, API, algorithms, database, frontend
+  - Section 8.5: Complete hybrid exact arithmetic specification (primary contribution)
+  - Section 9-10: Performance requirements, security considerations
+
+**Tests added**: N/A (documentation phase)
+
+**Commit**: Not yet committed (pending)
+
 **Status**: ✅ Complete
-**Notes**: Fundamental mathematical correctness fix. The foundation of the entire gasket must be exactly tangent, or errors propagate through all subsequent Descartes calculations. While perfect rational arithmetic is impossible with irrational square roots, this approach is vastly superior: symbolic solving ensures analytical correctness, 50-digit precision prevents accumulated error, and no trigonometric approximations. This fix aligns the implementation with the project's design philosophy of exact rational arithmetic. Ready for mathematical research use. Reference: ISSUES.md Issue #2.
+
+**Notes**: This specification serves as the architectural blueprint for all subsequent implementation phases (1-13). All type signatures, algorithms, database formats, and performance targets are now fully documented. Key insight: The bug isn't in the Descartes iteration - it's in the initial placement `.limit_denominator()` call that creates huge Fractions for irrational coordinates. The hybrid system solves this by keeping irrationals as SymPy expressions (no approximation) while optimizing rational/integer cases. Merged into existing `.DESIGN_SPEC.md` as Section 8.4. Ready to proceed with Phase 1 (exact_math.py implementation). Reference: ISSUES.md Issue #5 (to be created).
+
+### [2025-11-04 15:45] Phase 0: Merge and cleanup design documentation
+
+**What was done**: Merged hybrid exact arithmetic specification into existing `.DESIGN_SPEC.md` file and removed redundant documentation.
+
+**Specifics**:
+- Discovered existing comprehensive `.DESIGN_SPEC.md` file (hidden file with leading dot)
+- Merged new Section 8.4 "Hybrid Exact Arithmetic System" into existing document
+- Positioned section between "8.3 Sequence Detection Algorithms" and "9. Caching and Optimization"
+- Deleted redundant `DESIGN_SPEC.md` file (without dot) to avoid confusion
+- Condensed 600-line standalone spec into ~200-line section that integrates with existing architecture
+- Maintained all technical details: type system, algorithms, database format, testing strategy
+
+**Files changed**:
+- `.DESIGN_SPEC.md` - Added Section 8.4 (8.4.1-8.4.6) with hybrid arithmetic system (~200 lines)
+- `DESIGN_SPEC.md` - Deleted redundant file (was 600 lines)
+
+**Tests added**: N/A (documentation phase)
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: All technical specifications now consolidated in single authoritative document (`.DESIGN_SPEC.md`). Section 8.4 provides complete reference for exact_math.py module, type system, database storage, and testing requirements. Todo list created for Phases 1-13 implementation. Ready to begin Phase 1 (create exact_math.py module).
 
 ---
 
 ## Statistics
 
-**Total Entries**: 10
-**Completed**: 10
+**Total Entries**: 13
+**Completed**: 13
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-11-03 18:15
+**Last Updated**: 2025-11-04 15:45

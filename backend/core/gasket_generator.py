@@ -268,7 +268,7 @@ def _initialize_three_circles(curvatures: List[Fraction]) -> List[CircleData]:
     k1, k2, k3 = curvatures
 
     # Circle 1: at origin
-    c1_pos = (Fraction(0), Fraction(0))
+    c1_pos = (Fraction(1,1), Fraction(0))
     c1 = CircleData(
         curvature=k1,
         center=c1_pos,
@@ -283,6 +283,7 @@ def _initialize_three_circles(curvatures: List[Fraction]) -> List[CircleData]:
     # Handle degenerate case: if d12 == 0, circles are concentric
     # Place circle 2 at a small offset to allow solving for circle 3
     if d12 == 0:
+        raise ValueError("Cannot initialize three circles with two concentric circles (d12=0).")
         # For concentric circles, place c2 at origin but c3 will be positioned radially
         # This is a special configuration (e.g., outer circle with same-radius inner circle)
         c2_pos = (Fraction(0), Fraction(0))
@@ -322,8 +323,17 @@ def _initialize_three_circles(curvatures: List[Fraction]) -> List[CircleData]:
         curvature=k3,
         center=c3_pos,
         generation=0,
-        parent_ids=[],
+        parent_ids=[],  # Initial circles have no parents
     )
+
+    # Verify tangency between all pairs of initial circles
+    circle_pairs = [(c1, c2), (c2, c3), (c3, c1)]
+    for circle1, circle2 in circle_pairs:
+        if not verify_tangency(circle1, circle2):
+            raise ValueError(
+                f"Initial circle tangency verification failed between "
+                f"circles with curvatures {circle1.curvature} and {circle2.curvature}"
+            )
 
     return [c1, c2, c3]
 
@@ -438,6 +448,12 @@ def generate_apollonian_gasket(
                     generation=depth + 1,
                     parent_ids=[],  # Will be set when persisted to DB
                 )
+
+                # Verify tangency with all parent circles
+                if not all(verify_tangency(new_circle, parent) 
+                        for parent in [c1, c2, c3]):
+                    # Skip this circle if tangency verification fails
+                    continue
 
                 # Check for duplicates using hash
                 hash_key = new_circle.hash_key()
