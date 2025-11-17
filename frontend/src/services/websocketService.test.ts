@@ -81,6 +81,7 @@ describe('WebSocketService', () => {
 
     // Mock global WebSocket
     mockWebSocket = null as any;
+    // @ts-ignore - Mocking global WebSocket for tests
     (global as any).WebSocket = function (this: any, url: string) {
       mockWebSocket = new MockWebSocket(url) as any;
       return mockWebSocket as any;
@@ -127,6 +128,7 @@ describe('WebSocketService', () => {
 
     it('should reject if connection fails', async () => {
       // Override mock to simulate connection failure
+      // @ts-ignore - Mocking global WebSocket for tests
       (global as any).WebSocket = function (this: any, url: string) {
         mockWebSocket = new MockWebSocket(url) as any;
         setTimeout(() => {
