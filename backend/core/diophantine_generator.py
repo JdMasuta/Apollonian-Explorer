@@ -17,7 +17,7 @@ from collections import deque
 import sympy as sp
 import itertools
 
-from core.circle_data import CircleData, ComplexFraction
+from core.circle_data import CircleData
 from core.descartes import descartes_solve
 
 

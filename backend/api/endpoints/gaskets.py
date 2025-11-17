@@ -4,7 +4,7 @@ Gasket API endpoints.
 Reference: .DESIGN_SPEC.md section 5 (REST API Endpoints)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 
 # Use relative import
@@ -102,3 +102,23 @@ def get_gasket(gasket_id: int, db: Session = Depends(get_db)):
         )
 
     return gasket
+
+
+@router.delete("/gaskets/{gasket_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_gasket(gasket_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a gasket and all associated data.
+
+    Returns 204 No Content on success. Raises 404 if gasket not found.
+    """
+    service = GasketService(db)
+    deleted = service.delete_gasket(gasket_id)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket with ID {gasket_id} not found"}
+        )
+
+    # FastAPI will use the status_code on the decorator; return an empty Response
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

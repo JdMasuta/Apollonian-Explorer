@@ -13,13 +13,14 @@ from typing import List, Generator, Set, Tuple
 from collections import deque
 import sympy as sp
 
-from core.circle_data import CircleData, ComplexFraction
+from core.circle_data import CircleData
+from core.exact_math import ExactNumber, ExactComplex, smart_abs, smart_divide
 from core.descartes import descartes_solve
 
 
 def is_duplicate(
-    curvature: Fraction,
-    center: Tuple[Fraction, Fraction],
+    curvature: ExactNumber,
+    center: Tuple[ExactNumber, ExactNumber],
     existing_circles: List[CircleData],
     tolerance: float = 1e-10
 ) -> bool:
@@ -42,12 +43,12 @@ def is_duplicate(
         ISSUES.md Issue #3 - Incomplete deduplication in BFS
     """
     for existing in existing_circles:
-        # Check curvature match
-        curvature_diff = abs(float(curvature - existing.curvature))
+        # Check curvature match (handle ExactNumber types)
+        curvature_diff = float(smart_abs(curvature - existing.curvature))
         if curvature_diff < tolerance:
-            # Check center coordinates match
-            center_x_diff = abs(float(center[0] - existing.center[0]))
-            center_y_diff = abs(float(center[1] - existing.center[1]))
+            # Check center coordinates match (handle ExactNumber types)
+            center_x_diff = float(smart_abs(center[0] - existing.center[0]))
+            center_y_diff = float(smart_abs(center[1] - existing.center[1]))
 
             if center_x_diff < tolerance and center_y_diff < tolerance:
                 return True
@@ -76,64 +77,85 @@ def verify_tangency(
     Reference:
         ISSUES.md Issue #2 - Tangency verification for exact placement
     """
-    # Calculate actual distance between centers
+    # Calculate actual distance between centers (handle ExactNumber types)
     x1, y1 = circle1.center
     x2, y2 = circle2.center
-    actual_distance = float(((x2 - x1)**2 + (y2 - y1)**2) ** 0.5)
+
+    # Compute distance - handle SymPy expressions
+    dx = x2 - x1
+    dy = y2 - y1
+    distance_squared = dx**2 + dy**2
+
+    # Convert to float for numerical comparison
+    if isinstance(distance_squared, sp.Expr):
+        actual_distance = float(sp.sqrt(distance_squared))
+    else:
+        actual_distance = float(distance_squared ** 0.5)
 
     # Calculate expected tangency distance
-    expected_distance = float(_compute_tangent_distance(
-        circle1.curvature,
-        circle2.curvature
-    ))
+    expected_dist = _compute_tangent_distance(circle1.curvature, circle2.curvature)
+
+    # Convert to float for comparison
+    if isinstance(expected_dist, sp.Expr):
+        expected_distance = float(expected_dist)
+    else:
+        expected_distance = float(expected_dist)
 
     # Check if they match within tolerance
     error = abs(actual_distance - expected_distance)
     return error < tolerance
 
 
-def _compute_tangent_distance(k1: Fraction, k2: Fraction) -> Fraction:
+def _compute_tangent_distance(k1: ExactNumber, k2: ExactNumber) -> ExactNumber:
     """
     Compute exact distance between centers of two tangent circles.
 
+    Uses hybrid exact arithmetic to preserve exactness for all number types.
+
     Args:
-        k1, k2: Curvatures of two circles
+        k1, k2: Curvatures of two circles as ExactNumber
 
     Returns:
-        Exact distance as Fraction
+        Exact distance as ExactNumber (int, Fraction, or SymPy Expr)
 
     Reference:
         ISSUES.md Issue #2 - Exact rational arithmetic for initial placement
     """
-    r1 = Fraction(1) / abs(k1) if k1 != 0 else Fraction(1)
-    r2 = Fraction(1) / abs(k2) if k2 != 0 else Fraction(1)
+    # Calculate radii using smart_divide for exact arithmetic
+    r1 = smart_divide(1, smart_abs(k1)) if k1 != 0 else 1
+    r2 = smart_divide(1, smart_abs(k2)) if k2 != 0 else 1
 
     # Determine tangency type based on curvature signs
-    if k1 > 0 and k2 > 0:
+    # Use float comparison for SymPy expressions
+    k1_positive = float(k1) > 0 if isinstance(k1, sp.Expr) else k1 > 0
+    k2_positive = float(k2) > 0 if isinstance(k2, sp.Expr) else k2 > 0
+
+    if k1_positive and k2_positive:
         # Both circles external - distance is sum of radii
         return r1 + r2
-    elif k1 < 0 and k2 > 0:
+    elif not k1_positive and k2_positive:
         # Circle 1 encloses circle 2 - distance is difference
-        return abs(r1) - r2
-    elif k1 > 0 and k2 < 0:
+        return smart_abs(r1) - r2
+    elif k1_positive and not k2_positive:
         # Circle 2 encloses circle 1 - distance is difference
-        return abs(r2) - r1
+        return smart_abs(r2) - r1
     else:
         # Both negative (both enclosing) - edge case
-        return abs(abs(r1) - abs(r2))
+        return smart_abs(smart_abs(r1) - smart_abs(r2))
 
 
 def _solve_third_circle_position_exact(
     k1: Fraction, k2: Fraction, k3: Fraction,
     c1_pos: Tuple[Fraction, Fraction],
     c2_pos: Tuple[Fraction, Fraction]
-) -> Tuple[Fraction, Fraction]:
+) -> Tuple[ExactNumber, ExactNumber]:
     """
     Solve for exact position of third circle using symbolic math.
 
     Given two circles with known positions, finds the exact position
     of a third circle that is tangent to both, using sympy for
-    exact rational arithmetic throughout.
+    exact rational arithmetic throughout. Uses hybrid exact arithmetic
+    to preserve irrational values (sqrt expressions) as SymPy Expr types.
 
     Args:
         k1, k2, k3: Curvatures of the three circles
@@ -141,10 +163,14 @@ def _solve_third_circle_position_exact(
         c2_pos: Position (x, y) of circle 2 as Fractions
 
     Returns:
-        Position (x, y) of circle 3 as Fractions
+        Position (x, y) of circle 3 as ExactNumber tuple
+        - int for integer values
+        - Fraction for rational values
+        - SymPy Expr for irrational values (sqrt, etc.)
 
     Reference:
         ISSUES.md Issue #2 - Exact rational geometry for initial placement
+        .DESIGN_SPEC.md section 8.4 - Hybrid exact arithmetic system
     """
     # Define symbolic variables (use real=True, not rational=True)
     # Solutions often involve square roots which are irrational
@@ -183,32 +209,49 @@ def _solve_third_circle_position_exact(
     for sol in solutions:
         x_val, y_val = sol
 
-        # Convert sympy expressions to Python Fraction
-        # For irrational expressions (like sqrt), convert to float with high precision
+        # Convert SymPy expressions to hybrid exact types
+        # Rationals → int/Fraction, Irrationals → SymPy Expr (preserves exactness)
         try:
-            # Try exact rational conversion first
+            # Use hybrid exact arithmetic: keep int/Fraction for rationals, SymPy for irrationals
             if isinstance(x_val, sp.Rational):
-                x_frac = Fraction(int(x_val.p), int(x_val.q))
+                # Rational value - convert to int or Fraction
+                if x_val.q == 1:
+                    x_exact = int(x_val.p)
+                else:
+                    x_exact = Fraction(int(x_val.p), int(x_val.q))
             else:
-                # For irrational values, evaluate numerically with high precision
-                x_float = float(x_val.evalf(50))  # 50 digits of precision
-                x_frac = Fraction(x_float).limit_denominator(10**9)
+                # Irrational value - keep as SymPy Expr (preserves sqrt, etc.)
+                x_exact = x_val
 
             if isinstance(y_val, sp.Rational):
-                y_frac = Fraction(int(y_val.p), int(y_val.q))
+                # Rational value - convert to int or Fraction
+                if y_val.q == 1:
+                    y_exact = int(y_val.p)
+                else:
+                    y_exact = Fraction(int(y_val.p), int(y_val.q))
             else:
-                y_float = float(y_val.evalf(50))
-                y_frac = Fraction(y_float).limit_denominator(10**9)
+                # Irrational value - keep as SymPy Expr (preserves sqrt, etc.)
+                y_exact = y_val
 
             # Prefer solution with y > 0 (above x-axis)
-            if best_solution is None or y_frac > best_solution[1]:
-                best_solution = (x_frac, y_frac)
+            # Use float comparison for SymPy expressions
+            if best_solution is None:
+                best_solution = (x_exact, y_exact)
+            else:
+                # Compare y values (handle both Fraction and SymPy types)
+                if isinstance(y_exact, (int, Fraction)) and isinstance(best_solution[1], (int, Fraction)):
+                    if y_exact > best_solution[1]:
+                        best_solution = (x_exact, y_exact)
+                else:
+                    # At least one is SymPy - use float comparison
+                    if float(y_exact) > float(best_solution[1]):
+                        best_solution = (x_exact, y_exact)
         except (ValueError, AttributeError, TypeError) as e:
             # Skip solutions that can't be converted
             continue
 
     if best_solution is None:
-        raise ValueError("Cannot convert symbolic solution to exact Fraction")
+        raise ValueError("Cannot convert symbolic solution to ExactNumber types")
 
     return best_solution
 
@@ -268,7 +311,7 @@ def _initialize_three_circles(curvatures: List[Fraction]) -> List[CircleData]:
     k1, k2, k3 = curvatures
 
     # Circle 1: at origin
-    c1_pos = (Fraction(1,1), Fraction(0))
+    c1_pos = (Fraction(0), Fraction(0))
     c1 = CircleData(
         curvature=k1,
         center=c1_pos,

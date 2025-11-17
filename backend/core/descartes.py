@@ -23,6 +23,13 @@ Hybrid Arithmetic:
 """
 
 from typing import Tuple
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports when run as script
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from core.exact_math import (
     ExactNumber,
     ExactComplex,

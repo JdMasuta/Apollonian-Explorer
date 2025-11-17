@@ -169,3 +169,120 @@ Post-MVP: **Option 1** (refactor MockWebSocket) - Quick fix with high impact
 - Commit: `cd33d6f` - "test(frontend): improve WebSocket tests with fake timers (partial fix)"
 - Backend tests passing: `backend/tests/test_websocket.py` (14/14 ✓)
 - Vitest fake timers documentation: https://vitest.dev/guide/mocking.html#timers
+
+---
+
+### Issue #5: SymPy Arithmetic Performance Bottleneck in Deep Gasket Generation
+
+**Status:** Needs Optimization
+**Priority:** Medium (Impacts deep gasket generation with irrational configurations)
+**Discovered:** Phase 6 testing (2025-11-13)
+
+**Description**
+
+Gasket generation using SymPy expressions for irrational values (sqrt, trigonometric functions) is orders of magnitude slower than Fraction arithmetic. Configurations like `[1,2,2]` and `[1,1,1]` that produce irrational coordinates become impractical at depth 3+.
+
+The hybrid exact arithmetic system (Phase 6) successfully preserves irrational values as SymPy Expr types instead of approximating them as huge Fractions (which caused INTEGER overflow). However, SymPy symbolic mathematics is significantly slower than native Python Fraction operations, creating a performance bottleneck for deep generation.
+
+**Performance Evidence**
+
+Configuration `[1, 2, 2]` (produces irrational coordinates):
+- Depth 1: ~1 second ✅
+- Depth 3: >60 seconds (timeout) ❌
+- Depth 6: >120 seconds (timeout) ❌
+
+Configuration `[-1, 2, 2]` (fewer irrationals, more rationals):
+- Depth 1: <1 second ✅
+- Depth 3: ~3 seconds ✅
+- Depth 5: ~15 seconds ✅
+
+**Root Cause**
+
+SymPy symbolic arithmetic performs exact symbolic manipulation which is computationally expensive compared to fixed-precision arithmetic. Complex expressions involving `sqrt()`, `cos()`, `atan()`, and nested operations grow exponentially in complexity through recursive Descartes iterations.
+
+Example progression:
+```
+Generation 0: sqrt(2)
+Generation 1: 5 + 4*sqrt(2)
+Generation 2: (16/3 + 6*cos(atan(4*sqrt(2)/7)/2))/(5 + 4*sqrt(2))
+Generation 3: [Extremely complex nested expression]
+```
+
+Each Descartes iteration compounds the expression complexity, causing exponential slowdown.
+
+**Affected Components**
+
+- `backend/core/gasket_generator.py` - `generate_apollonian_gasket()` function
+- `backend/core/descartes.py` - SymPy-based Descartes calculations
+- `backend/api/endpoints/gaskets.py` - API timeout for deep generation requests
+- All client applications requesting deep gaskets with irrational values
+
+**Recommended Solutions** (in order of preference)
+
+**Option 1: Selective Approximation (Hybrid Computation Approach)** [RECOMMENDED]
+- **Strategy:** Use exact SymPy for storage/serialization, float approximations for intermediate calculations
+- **Implementation:**
+  - Maintain SymPy expressions in CircleData for database persistence
+  - Convert to float for Descartes calculations in generation loop
+  - Store final results as SymPy for exactness
+- **Trade-offs:**
+  - ✅ Maintains exactness in database (no loss of information)
+  - ✅ Fast generation (float arithmetic performance)
+  - ✅ User can choose: exact mode (slow) or fast mode (approximated calculations)
+  - ⚠️ Intermediate calculations lose symbolic exactness
+- **Estimated Effort:** 4-6 hours
+
+**Option 2: Expression Simplification & Caching**
+- **Strategy:** Aggressively simplify and cache SymPy expressions during generation
+- **Implementation:**
+  - Call `sp.simplify()` after each Descartes calculation
+  - Cache common subexpressions (e.g., `sqrt(2)`, `sqrt(3)`)
+  - Implement expression complexity threshold (auto-approximate if too complex)
+- **Trade-offs:**
+  - ✅ Maintains symbolic exactness
+  - ✅ Reduces redundant symbolic computation
+  - ⚠️ `sp.simplify()` itself is slow for complex expressions
+  - ⚠️ May not solve problem for very deep generation
+- **Estimated Effort:** 6-8 hours
+
+**Option 3: Parallel Generation with Multiprocessing**
+- **Strategy:** Parallelize BFS branches across CPU cores
+- **Implementation:**
+  - Split BFS queue into independent branches
+  - Use `multiprocessing.Pool` to process branches in parallel
+  - Merge results with deduplication
+- **Trade-offs:**
+  - ✅ Leverages multi-core CPUs
+  - ⚠️ Significant implementation complexity
+  - ⚠️ Higher memory usage (multiple processes)
+  - ⚠️ Doesn't solve fundamental SymPy slowness
+- **Estimated Effort:** 12-16 hours
+
+**Option 4: Depth-Based Mode Switching**
+- **Strategy:** Use exact SymPy arithmetic up to a threshold, switch to approximations beyond
+- **Implementation:**
+  - Exact mode: depth ≤ 2 (SymPy expressions)
+  - Fast mode: depth > 2 (float approximations, convert to Fraction)
+  - Make threshold user-configurable via API parameter
+- **Trade-offs:**
+  - ✅ Simple to implement
+  - ✅ Predictable performance characteristics
+  - ⚠️ Loses exactness at deep levels
+  - ⚠️ Transition between modes may introduce discontinuity
+- **Estimated Effort:** 2-3 hours
+
+**Recommendation**
+
+For **Phase 11 (Performance Optimization)**: Implement **Option 1** (Selective Approximation)
+
+Rationale:
+- Best balance of performance and exactness
+- Database retains full symbolic information
+- User can choose between exact (slow) and fast (approximated) modes
+- Aligns with hybrid arithmetic philosophy (smart type selection)
+
+**Reference**
+
+- Phase 6 implementation: Removed `.limit_denominator()`, introduced SymPy preservation
+- Test evidence: `backend/test_phase6_depth1.py` (depth 1 works, depth 3+ times out)
+- Related commit: Phase 6 gasket_generator.py refactoring

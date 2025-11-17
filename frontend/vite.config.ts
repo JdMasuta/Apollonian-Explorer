@@ -9,8 +9,9 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:8000',
       '/ws': {
-        target: 'ws://localhost:8000',
-        ws: true
+        target: 'http://localhost:8000',  // Use http:// for target, Vite handles ws upgrade
+        ws: true,
+        changeOrigin: true
       }
     }
   }
