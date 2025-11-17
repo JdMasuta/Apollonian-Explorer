@@ -28,7 +28,36 @@ from db import Gasket, Circle
 from core.gasket_generator import generate_apollonian_gasket
 from core.diophantine_generator import generate_apollonian_gasket as generate_diophantine_gasket
 from core.circle_math import fraction_to_tuple
+from core.exact_math import ExactNumber
 from schemas import GasketResponse, CircleResponse
+
+
+def parse_curvature_string(s: str) -> ExactNumber:
+    """
+    Parse curvature string to ExactNumber, preserving int vs Fraction types.
+
+    Args:
+        s: Curvature string (e.g., "6", "3/2", "-1")
+
+    Returns:
+        int if string represents integer, Fraction otherwise
+
+    Examples:
+        >>> parse_curvature_string("6")
+        6  # int
+        >>> parse_curvature_string("3/2")
+        Fraction(3, 2)
+        >>> parse_curvature_string("-1")
+        -1  # int
+    """
+    # Try parsing as Fraction first (handles both "6" and "3/2")
+    frac = Fraction(s)
+
+    # If denominator is 1, return as int
+    if frac.denominator == 1:
+        return frac.numerator  # Returns int
+    else:
+        return frac  # Returns Fraction
 
 
 class GasketService:
@@ -170,13 +199,14 @@ class GasketService:
         Reference:
             .DESIGN_SPEC.md section 8.2 - Gasket generation algorithm
         """
-        # Parse curvatures as Fractions
-        fracs = [Fraction(c) for c in curvatures]
+        # Parse curvatures as ExactNumbers (int or Fraction)
+        # Preserves int type for integers, uses Fraction for rationals
+        parsed_curvatures = [parse_curvature_string(c) for c in curvatures]
 
         # Generate gasket using core algorithm
         circles_data = list(
-            #generate_diophantine_gasket(fracs, max_depth, stream=False)
-            generate_apollonian_gasket(fracs, max_depth, stream=False)
+            #generate_diophantine_gasket(parsed_curvatures, max_depth, stream=False)
+            generate_apollonian_gasket(parsed_curvatures, max_depth, stream=False)
         )
 
         # Create Gasket model
@@ -192,20 +222,28 @@ class GasketService:
 
         # Create Circle models
         for circle_data in circles_data:
-            # Convert CircleData to Circle model
-            center_real, center_imag = circle_data.center
+            # Convert CircleData to Circle model using hybrid exact arithmetic
+            # to_database_dict() provides both INTEGER and TEXT column values
+            db_dict = circle_data.to_database_dict()
 
             circle = Circle(
                 gasket_id=gasket.id,
                 generation=circle_data.generation,
-                curvature_num=circle_data.curvature.numerator,
-                curvature_denom=circle_data.curvature.denominator,
-                center_x_num=center_real.numerator,
-                center_x_denom=center_real.denominator,
-                center_y_num=center_imag.numerator,
-                center_y_denom=center_imag.denominator,
-                radius_num=circle_data.radius().numerator,
-                radius_denom=circle_data.radius().denominator,
+                # INTEGER columns (for indexing and backward compatibility)
+                curvature_num=db_dict["curvature_num"],
+                curvature_denom=db_dict["curvature_denom"],
+                center_x_num=db_dict["center_x_num"],
+                center_x_denom=db_dict["center_x_denom"],
+                center_y_num=db_dict["center_y_num"],
+                center_y_denom=db_dict["center_y_denom"],
+                radius_num=db_dict["radius_num"],
+                radius_denom=db_dict["radius_denom"],
+                # TEXT columns (for exact storage, Phase 3 migration)
+                curvature_exact=db_dict["curvature_exact"],
+                center_x_exact=db_dict["center_x_exact"],
+                center_y_exact=db_dict["center_y_exact"],
+                radius_exact=db_dict["radius_exact"],
+                # Metadata
                 parent_ids=json.dumps(circle_data.parent_ids),
                 tangent_ids=json.dumps(circle_data.tangent_ids),
             )
@@ -265,3 +303,22 @@ class GasketService:
             access_count=gasket.access_count,
             circles=circle_responses,
         )
+
+    def delete_gasket(self, gasket_id: int) -> bool:
+        """
+        Delete a gasket and its associated circles from the database.
+
+        Args:
+            gasket_id: ID of the gasket to delete
+
+        Returns:
+            True if a gasket was deleted, False if not found.
+        """
+        gasket = self.db.query(Gasket).filter(Gasket.id == gasket_id).first()
+        if not gasket:
+            return False
+
+        # Delete gasket (CASCADE should remove circles if configured)
+        self.db.delete(gasket)
+        self.db.commit()
+        return True

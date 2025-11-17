@@ -811,10 +811,294 @@ During test writing, discovered 5 functions were missing from exact_math.py:
 
 ---
 
+### [2025-11-04 13:00] Phase 4: Refactor descartes.py to Use Hybrid Arithmetic
+
+**What was done**: Completely refactored the Descartes Circle Theorem implementation to use the hybrid exact arithmetic system, replacing pure SymPy with intelligent type selection.
+
+**Specifics**:
+- **Replaced Pure SymPy**: Migrated from `sympy.Rational` to `ExactNumber` (int/Fraction/SymPy union type)
+- **Updated Function Signatures**: Changed all functions to accept and return `ExactNumber` types
+- **Implemented Smart Operations**: Replaced direct arithmetic with:
+  - `smart_add()`, `smart_multiply()`, `smart_divide()`, `smart_sqrt()` for scalar operations
+  - `smart_complex_multiply()`, `smart_complex_sqrt()` for complex number operations
+  - Custom helper functions: `_scalar_complex_multiply()`, `_scalar_complex_divide()`, `_complex_add()`
+
+- **Changed Complex Number Representation**:
+  - Old: SymPy complex expressions (`x + y*I`)
+  - New: Tuple format `(real, imag)` where each component is `ExactNumber`
+  - Enables component-wise optimization (e.g., `(int, Fraction)` for mixed types)
+
+- **Key Functions Refactored**:
+  1. `descartes_curvature()` - Curvature calculation with hybrid arithmetic
+  2. `descartes_center()` - Complex center calculation with tuple-based complex numbers
+  3. `descartes_solve()` - Convenience wrapper (minimal changes)
+  4. `create_complex()` - Now returns `(x, y)` tuple instead of SymPy complex
+  5. `get_complex_parts()` - Now uses `smart_real()` and `smart_imag()`
+
+**Performance Optimizations**:
+- **int used for integer results**: Curvature 3 stored as `int` (not `Rational(3, 1)`)
+- **Fraction used for rationals**: Center coordinate `4/3` stored as `Fraction(4, 3)`
+- **SymPy used only for irrationals**: `3 ± 2√3` preserved as SymPy `Add` expression
+- **Expected speedup**: 15-25x for common integer/rational cases
+
+**Testing Results**:
+```
+Test 1: Standard gasket (-1, 2, 2)
+  ✓ k4_plus = 3 (int)
+  ✓ k4_minus = 3 (int)
+  ✓ center = (0, 4/3) with types (int, Fraction)
+
+Test 2: Irrational case (1, 1, 1)
+  ✓ k4_plus = 3 + 2*sqrt(3) (SymPy Add)
+  ✓ k4_minus = 3 - 2*sqrt(3) (SymPy Add)
+  ✓ Irrationals preserved symbolically!
+```
+
+**Files changed**:
+- `backend/core/descartes.py` - Complete refactor (432 lines, ~60% rewritten)
+  - Replaced all SymPy Rational operations with hybrid arithmetic
+  - Added 3 internal helper functions for complex arithmetic
+  - Updated all docstrings with hybrid arithmetic references
+  - Added comprehensive test cases in `__main__` section
+
+**Backward Compatibility**:
+- Function signatures remain compatible (accept int/Fraction/SymPy)
+- Return types now more efficient (int when possible, not Rational)
+- Complex numbers changed from SymPy to tuples (breaking change for internal APIs)
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: The refactor successfully achieves the hybrid arithmetic goals. Integer and rational results are now stored in optimal types (int/Fraction) rather than always using SymPy Rational. Irrational results containing √2, √3, etc. are preserved as SymPy expressions, avoiding the `.limit_denominator()` approximation that caused INTEGER overflow. The tuple-based complex representation enables per-component type optimization (e.g., integer real part with irrational imaginary part). This is a foundational change that will be leveraged by gasket_generator.py in Phase 6. Ready to proceed with Phase 5 (CircleData class update).
+
+---
+
+### [2025-11-04 13:30] Phase 5: Update CircleData Class with ExactNumber Types
+
+**What was done**: Completely refactored `CircleData` class and `circle_math.py` utilities to use hybrid exact arithmetic system, enabling support for int, Fraction, and SymPy expression types.
+
+**Specifics**:
+- **CircleData Type System Update**:
+  - Changed `curvature: Fraction` → `curvature: ExactNumber`
+  - Changed `center: ComplexFraction` → `center: ExactComplex`
+  - Updated all methods to use `exact_math` functions
+
+- **Methods Refactored** (4 existing + 1 new):
+  1. `radius()` - Now uses `smart_divide(1, curvature)` instead of `Fraction(1)/curvature`
+  2. `hash_key()` - Uses `format_exact()` for canonical string representation
+  3. `to_dict()` - Converts to unified fraction format ("6/1", "3/2", "141421/100000")
+  4. `__repr__()` - Uses `smart_real()` and `smart_imag()` for center extraction
+  5. `to_database_dict()` - **NEW** - Dual storage strategy (INTEGER + TEXT columns)
+
+- **Unified Fraction Format** (per user requirement):
+  - int: `6` → `"6/1"`
+  - Fraction: `3/2` → `"3/2"`
+  - SymPy: `sqrt(2)` → `"14142136/10000000"` (approximated as large fraction)
+  - Consistent API response format
+
+- **Dual Storage Strategy**:
+  - **INTEGER columns**: Lossy num/denom pairs for indexing and queries
+  - **TEXT columns**: Exact tagged strings ("int:6", "frac:3/2", "sym:sqrt(2)")
+  - Backward compatible with existing database schema
+  - Uses Phase 3 migration TEXT columns
+
+**circle_math.py Updates**:
+- `curvature_to_radius()` - Now accepts `ExactNumber`, uses `smart_divide()`
+- `circle_hash()` - Now accepts `ExactNumber`, uses `format_exact()` for hashing
+- Backward compatible `fraction_to_tuple()` and `tuple_to_fraction()` retained
+
+**gasket_service.py Updates**:
+- Updated Circle model creation to use `circle_data.to_database_dict()`
+- Now populates both INTEGER and TEXT columns in single operation
+- Eliminates direct `.numerator`/`.denominator` access
+
+**Testing Results**:
+```
+Test 1: Integer curvature (6)
+  ✓ Radius: 1/6 (Fraction)
+  ✓ Serialized: "6/1" (unified format)
+
+Test 2: Fraction curvature (3/2)
+  ✓ Radius: 2/3
+  ✓ Serialized: "3/2"
+
+Test 3: SymPy curvature (3 + 2*sqrt(3))
+  ✓ Radius: -1 + 2*sqrt(3)/3 (SymPy)
+  ✓ Serialized: "4052391495/626907146" (approximated)
+
+Test 4: Database dict
+  ✓ INTEGER: curvature_num=3, curvature_denom=2
+  ✓ TEXT: curvature_exact="frac:3/2"
+
+Test 5: Hash deduplication
+  ✓ Identical circles produce identical hashes
+
+Test 6: circle_math functions
+  ✓ All functions work with ExactNumber types
+```
+
+**Database Changes**:
+- Cleared all existing gaskets and circles (per user decision)
+- Fresh start with new hash format
+- Ready for hybrid exact arithmetic system
+
+**Files changed**:
+- `backend/core/circle_data.py` - Complete refactor (309 lines, 5 methods updated/added)
+- `backend/core/circle_math.py` - Updated helper functions (194 lines)
+- `backend/services/gasket_service.py` - Updated database persistence (lines 193-220)
+- `backend/test_phase5.py` - Created comprehensive test suite (75 lines)
+- `backend/apollonian_gasket.db` - Cleared (0 gaskets, 0 circles)
+
+**Backward Compatibility**:
+- **Breaking**: Old hashes incompatible (mitigated by database clear)
+- **Breaking**: Direct `.numerator`/`.denominator` access removed
+- **Compatible**: `circle_math` retains `fraction_to_tuple()`, `tuple_to_fraction()`
+- **Compatible**: Database schema unchanged (uses Phase 3 columns)
+
+**Commit**: Not yet committed (pending)
+
+**Status**: ✅ Complete
+
+**Notes**: Phase 5 successfully bridges CircleData with the hybrid exact arithmetic system. The `to_database_dict()` method provides clean abstraction for database persistence with dual storage (INTEGER for queries, TEXT for exactness). The unified fraction format ensures consistent API responses. Hash format changed but incompatible hashes eliminated by database clear. CircleData now seamlessly accepts int, Fraction, or SymPy types without conversion overhead. Ready for Phase 6 (gasket_generator.py refactor) which will remove the `.limit_denominator()` calls that caused the original INTEGER overflow bug.
+
+---
+
+### [2025-11-17 08:35] Phase 10: API Integration Testing Complete
+
+**What was done**: Implemented comprehensive integration test suite for gasket API endpoints with 30 tests covering all CRUD operations, exact number persistence, caching behavior, and error handling. Fixed critical hanging test bug and resolved type preservation issues.
+
+**Specifics**:
+
+**Test Suite Implementation** (30 tests, 7 test classes):
+1. **TestPostGaskets** (10 tests):
+   - Integer curvature gasket creation
+   - Fraction curvature gasket creation
+   - Database persistence verification
+   - Previously failing [1,2,2] configuration (Issue #2, #3 fixes verified)
+   - Irrational-producing configuration [6,1,1] with SymPy expressions
+   - Cache hit with sufficient depth (hash-based lookup)
+   - Cache miss requiring regeneration
+   - Invalid curvature format validation (422 error)
+   - Zero curvature rejection
+   - Depth parameter validation (negative, zero, excessive)
+
+2. **TestGetGasket** (4 tests):
+   - GET existing gasket by ID
+   - GET nonexistent gasket (404 error)
+   - Access count tracking increments
+   - last_accessed_at timestamp updates
+
+3. **TestDeleteGasket** (3 tests):
+   - DELETE existing gasket
+   - Cascade deletion of associated circles (foreign key constraint)
+   - DELETE nonexistent gasket (404 error)
+
+4. **TestExactNumberPersistence** (5 tests):
+   - Integer type preservation ("int:6" in curvature_exact column)
+   - Fraction type preservation ("frac:3/2")
+   - SymPy type preservation ("sym:sqrt(2)")
+   - Mixed types in single gasket (int, Fraction, SymPy coexist)
+   - Hybrid property fallback (TEXT → INTEGER columns)
+
+5. **TestCachingBehavior** (3 tests):
+   - Hash consistency (same curvatures → same hash)
+   - Hash order independence ([1,2,2] ≡ [2,1,2])
+   - Different curvatures → different hashes
+
+6. **TestErrorHandling** (5 tests):
+   - Malformed JSON request body
+   - Missing required fields (curvatures)
+   - Wrong curvature count (2 or 5 curvatures, need 3 or 4)
+   - Invalid fraction format ("1//2", "abc")
+   - Extremely large depth (max_depth=100 rejected)
+
+**Critical Bugs Found and Fixed**:
+
+1. **67-Hour Hanging Test** (backend/tests/test_api_gaskets.py:659-668):
+   - **Problem**: `test_missing_required_fields` ran for 67+ hours without completing
+   - **Root Cause**: Test expected 422 for missing `max_depth`, but schema has `default=5`
+     - API accepted request: `{"curvatures": ["1", "2", "2"]}`
+     - Started generating [1,2,2] gasket at depth 5 (default)
+     - Config [1,2,2] produces irrational coordinates → SymPy expressions
+     - Depth 5 with SymPy arithmetic = exponential complexity (67+ hours)
+   - **Fix**: Removed incorrect test case expecting 422 for optional field
+   - **Impact**: Test now completes in 0.70 seconds instead of 67+ hours
+   - **Related Issue**: Documented SymPy performance limitation in ISSUES.md (Issue #5)
+
+2. **Test Failure: test_invalid_curvature_format** (backend/tests/test_api_gaskets.py:316):
+   - **Problem**: Expected 400 (Bad Request), got 422 (Unprocessable Entity)
+   - **Root Cause**: FastAPI/Pydantic validation returns 422, not 400
+   - **Fix**: Updated assertion to expect 422
+   - **Status**: ✅ Fixed
+
+3. **Test Failure: test_integer_type_preserved** (backend/tests/test_api_gaskets.py:481):
+   - **Problem**: Integer curvature "6" stored as "frac:6/1" instead of "int:6"
+   - **Root Cause**: `gasket_service.py:174` parsed all curvatures as `Fraction(c)`
+     - Fraction("6") creates Fraction(6,1), not int(6)
+     - format_exact(Fraction(6,1)) → "frac:6/1"
+     - Lost distinction between integer and rational inputs
+   - **Fix**: Created `parse_curvature_string()` helper function
+     - Parses "6" → int(6)
+     - Parses "3/2" → Fraction(3, 2)
+     - Preserves ExactNumber type distinction
+   - **Status**: ✅ Fixed
+
+**Test Results**:
+```
+Initial run (with bugs):
+  28 passed, 2 failed (93.3% pass rate)
+  Duration: 13:32 (812 seconds)
+
+Final run (all fixes applied):
+  ✅ 30 passed, 0 failed (100% pass rate)
+  Duration: 14:11 (851 seconds)
+```
+
+**Performance Notes**:
+- Tests limited to max_depth=1 for most cases (Issue #5 mitigation)
+- Irrational configurations tested but kept shallow (depth 1)
+- Full depth testing deferred to Phase 11 (Performance Optimization)
+- Reference: ISSUES.md Issue #5 - SymPy performance at depth 3+
+
+**Files changed**:
+- `backend/tests/test_api_gaskets.py` - Created full test suite (700+ lines, 30 tests)
+  - Lines 659-668: Fixed hanging test (removed incorrect max_depth validation)
+  - Line 316: Changed assertion from 400 to 422
+- `backend/services/gasket_service.py` - Added integer type preservation
+  - Lines 35-60: Added `parse_curvature_string()` helper function
+  - Line 204: Updated curvature parsing to preserve int vs Fraction types
+  - Added import: `from core.exact_math import ExactNumber`
+
+**Tests added**:
+- `backend/tests/test_api_gaskets.py` - 30 integration tests across 7 test classes
+  - TestPostGaskets: 10 tests
+  - TestGetGasket: 4 tests
+  - TestDeleteGasket: 3 tests
+  - TestExactNumberPersistence: 5 tests
+  - TestCachingBehavior: 3 tests
+  - TestErrorHandling: 5 tests
+
+**Commit**: Pending
+
+**Status**: ✅ Complete
+
+**Notes**:
+- Phase 10 validates end-to-end API functionality with hybrid exact arithmetic
+- All CRUD operations tested (Create, Read, Delete)
+- Exact number type preservation verified for int, Fraction, and SymPy types
+- Hash-based caching tested and working correctly
+- 67-hour hanging test revealed SymPy performance limitation (documented in Issue #5)
+- Integer type preservation fix ensures "6" stays as int(6), not Fraction(6,1)
+- Test suite provides regression protection for future changes
+- Ready for Phase 11 (Performance Optimization) or other phases per IMPLEMENTATION_PLAN.md
+
+---
+
 ## Statistics
 
-**Total Entries**: 17
-**Completed**: 17
+**Total Entries**: 20
+**Completed**: 20
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-11-04 12:50
+**Last Updated**: 2025-11-17 08:35
