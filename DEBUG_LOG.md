@@ -288,7 +288,56 @@ FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memor
 
 ### WebSocket Errors
 
-*No errors logged yet*
+#### [ERR-007] 2025-11-17 - WebSocket Connection Fails: Backend Server Not Running
+**Error Message**:
+```
+websocketService.ts:216 [WebSocket] Disconnecting...
+websocketService.ts:216 WebSocket connection to 'ws://localhost:5173/ws/gasket/generate' failed:
+  WebSocket is closed before the connection is established.
+websocketService.ts:148 [WebSocket] Connection error: Event {isTrusted: true, type: 'error', ...}
+```
+**Context**: Frontend attempting to connect to WebSocket endpoint for gasket generation streaming. Error occurred in `frontend/src/services/websocketService.ts` when calling `connect()` method.
+
+**Root Cause**: Backend server not running. The Python virtual environment (`backend/venv/`) did not exist, which meant uvicorn could not start. The frontend Vite proxy was correctly configured to forward `/ws` requests to `ws://localhost:8000`, but there was no backend listening on port 8000.
+
+**Solution**:
+1. Created Python virtual environment:
+   ```bash
+   cd backend
+   python3 -m venv venv
+   ```
+2. Installed all backend dependencies:
+   ```bash
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+3. Started backend server in background:
+   ```bash
+   source venv/bin/activate
+   uvicorn main:app --reload --port 8000
+   ```
+4. Verified server is running:
+   ```bash
+   curl http://localhost:8000/health
+   # Expected: {"status":"healthy","database":"...","version":"1.0.0"}
+   ```
+5. Verified port 8000 is listening:
+   ```bash
+   lsof -i :8000
+   # Expected: python process listening on :8000
+   ```
+
+**Prevention**:
+- Always check if backend server is running before testing frontend WebSocket features
+- Use `npm run dev` to start both backend and frontend simultaneously (from project root)
+- Check process list: `ps aux | grep uvicorn` before debugging WebSocket errors
+- Verify port is listening: `lsof -i :8000` or `netstat -tlnp | grep :8000`
+- Add startup check in WebSocket service that provides clearer error messages
+- Consider adding health check ping before WebSocket connection attempt
+
+**Related**: None
+
+**Files Changed**: None (environmental setup only, no code changes)
 
 ---
 
@@ -307,11 +356,15 @@ FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memor
 - "migration" → ERR-004
 - "float comparison" → ERR-005
 - "out of memory" → ERR-006
+- "websocket" → ERR-007
+- "connection failed" → ERR-007
+- "backend not running" → ERR-007
 
 ### By File
 - `backend/core/descartes.py` → ERR-002, ERR-005
 - `backend/api/deps.py` → ERR-001
 - `frontend/src/components/GasketCanvas/` → ERR-003
+- `frontend/src/services/websocketService.ts` → ERR-007
 - `backend/alembic/` → ERR-004
 
 ### By Error Type
@@ -321,18 +374,20 @@ FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memor
 - **Database Errors**: ERR-004
 - **Test Failures**: ERR-005
 - **Build Errors**: ERR-006
+- **WebSocket Errors**: ERR-007
 
 ---
 
 ## Statistics
 
-**Total Errors Logged**: 6 (examples)
+**Total Errors Logged**: 7
 **Backend Errors**: 2
 **Frontend Errors**: 1
 **Database Errors**: 1
 **Test Errors**: 1
 **Build Errors**: 1
-**Last Updated**: 2025-10-29 15:00
+**WebSocket Errors**: 1
+**Last Updated**: 2025-11-17 23:10
 
 ---
 
