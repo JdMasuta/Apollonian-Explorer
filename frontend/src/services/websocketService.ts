@@ -93,10 +93,23 @@ class WebSocketService {
   /**
    * Initialize WebSocket service with URL.
    *
-   * @param url - WebSocket URL (default: ws://localhost:8000/ws/gasket/generate)
+   * In development mode, uses Vite proxy (ws://localhost:5173/ws/gasket/generate).
+   * In production, connects directly to backend (ws://localhost:8000/ws/gasket/generate).
+   *
+   * @param url - Optional WebSocket URL override
    */
-  constructor(url: string = 'ws://localhost:8000/ws/gasket/generate') {
-    this.url = url;
+  constructor(url?: string) {
+    // Determine WebSocket URL based on environment
+    if (url) {
+      this.url = url;
+    } else if (import.meta.env.DEV) {
+      // Development: Use Vite proxy on same host as frontend
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.url = `${protocol}//${window.location.host}/ws/gasket/generate`;
+    } else {
+      // Production: Connect directly to backend
+      this.url = 'ws://localhost:8000/ws/gasket/generate';
+    }
   }
 
   /**
