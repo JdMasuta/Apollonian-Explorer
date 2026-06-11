@@ -286,6 +286,52 @@ FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memor
 
 ---
 
+#### [ERR-007] 2026-06-11 - migrations/__init__.py SyntaxError: module name starts with digit
+**Error Message**:
+```
+invalid-syntax: Expected `import`, found float (ruff, migrations/__init__.py:17)
+SyntaxError: invalid decimal literal  (on any `import migrations`)
+```
+**Context**: Found by the first `ruff check` run in Milestone 0. The package
+init contained `from migrations.001_add_exact_columns import (...)`.
+**Root Cause**: Python module names must be valid identifiers; `001_...`
+starts with a digit, so the `from ... import` statement is a syntax error.
+Any `import migrations` would have crashed — the package was never imported,
+which is why this shipped unnoticed.
+**Solution**: Removed the import and `__all__` from `migrations/__init__.py`;
+documented that numbered migration modules must be run as scripts or loaded
+via `importlib.util.spec_from_file_location`.
+**Prevention**: Lint in CI (ruff now runs in `.github/workflows/ci.yml`);
+avoid digit-leading module names for importable code.
+**Related**: ERR-004 (same migration file, different issue)
+**Files Changed**:
+- `backend/migrations/__init__.py` - Removed syntactically invalid import
+
+---
+
+#### [ERR-008] 2026-06-11 - AttributeError: 'Zero' object has no attribute 'sqrt'
+**Error Message**:
+```
+AttributeError: 'Zero' object has no attribute 'sqrt'
+  File "backend/core/engine/seeds.py", in _rational_sqrt
+    num_root = sp.Integer(frac.numerator).sqrt()
+```
+**Context**: New engine seed placement (`seed_from_quadruple`) computing the
+exact square root of a rational y² that happened to be 0 (collinear centers,
+e.g. the (-1, 2, 2, 3) quadruple where the third circle lies on the x-axis).
+**Root Cause**: `sympy.Integer.sqrt()` is not a stable API across values —
+`sp.Integer(0)` is the `Zero` singleton, which doesn't implement `.sqrt`.
+**Solution**: Detect perfect squares with `math.isqrt` on numerator and
+denominator; fall back to `sp.sqrt(sp.Rational(...))` only for irrational
+results.
+**Prevention**: Use `math.isqrt` for integer square-root checks; treat SymPy
+singleton classes (Zero, One) as lacking the full Integer surface.
+**Related**: None
+**Files Changed**:
+- `backend/core/engine/seeds.py` - `_rational_sqrt` uses `math.isqrt`
+
+---
+
 ### WebSocket Errors
 
 *No errors logged yet*

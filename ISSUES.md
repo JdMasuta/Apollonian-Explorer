@@ -10,8 +10,14 @@ This document tracks identified bugs, potential performance bottlenecks, and req
 
 ### Issue #1: Extraneous Database Query for Gasket Retrieval Post-Update
 
-**Status:** Needs Investigation
+**Status:** ✅ Fixed (2026-06-11, Revamp Milestone 0)
 **Priority:** Medium (Potential Performance Bottleneck)
+
+**Resolution:** Root cause confirmed: `Session.commit()` expires all ORM
+attributes by default, so serializing the gasket *after* the access-tracking
+commit re-SELECTed the gasket and all of its circles. `GasketService` now
+builds the response **before** committing, in both `create_or_get_gasket`
+(cache-hit path) and `get_gasket`. See `backend/services/gasket_service.py`.
 
 **Description**
 
@@ -174,7 +180,17 @@ Post-MVP: **Option 1** (refactor MockWebSocket) - Quick fix with high impact
 
 ### Issue #5: SymPy Arithmetic Performance Bottleneck in Deep Gasket Generation
 
-**Status:** Needs Optimization
+**Status:** Superseded by `core/engine` (Revamp Milestone 1, 2026-06-11) —
+the inversive-coordinate engine generates with linear integer/rational
+arithmetic only (no square roots, no SymPy in the hot loop): depth-10
+classic gasket (118,100 circles) in ~0.5s. Irrational seeds keep SymPy
+scalars but only through linear combinations (no `simplify` per step).
+The legacy generator (`core/gasket_generator.py`) is retained as a test
+oracle until Milestone 2 switches the service layer over; this issue
+remains open only for that legacy path. Issues #2 (float-approximate
+placement) and #3 (incomplete deduplication) are likewise resolved
+structurally in the engine: seeds are verified by exact algebraic
+identities, and the reduced-word walk cannot produce duplicates.
 **Priority:** Medium (Impacts deep gasket generation with irrational configurations)
 **Discovered:** Phase 6 testing (2025-11-13)
 

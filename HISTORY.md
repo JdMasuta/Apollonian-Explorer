@@ -1224,10 +1224,65 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-11 06:40] Revamp Milestone 0: Foundations & Hygiene
+**What was done**: Executed Milestone 0 of REVAMP_BLUEPRINT.md — packaging, CI, lint/type tooling, removal of `sys.path` hacks, dead-code and doc-error cleanup, and the Issue #1 fix.
+**Specifics**:
+- Added `backend/pyproject.toml` (installable package config, pytest `pythonpath`, ruff/black/mypy config; mypy `--strict` scoped to `core/engine`)
+- Added GitHub Actions CI (`.github/workflows/ci.yml`): backend ruff + mypy + pytest, frontend lint + vitest + build
+- Removed unconditional `sys.path.insert` hacks from 10 library/test modules (replaced by pytest `pythonpath` and package config)
+- Deleted dead code in `core/gasket_generator.py` (unreachable block after `raise` in `_initialize_three_circles`)
+- Corrected mathematically wrong docstring example in `core/descartes.py`: `(-1,2,2)` yields the double root `(3,3)` (discriminant 0), not `(6, 2/3)`
+- Rewrote stale `tests/test_descartes.py` against the current hybrid API (old file imported removed `complex_multiply`/`complex_sqrt` and pinned pre-hybrid Fraction-only types; suite did not even collect)
+- Removed ad-hoc scratch scripts `test_phase5/6/6_light/6_minimal/6_depth1/9.py`, `debug_tangency.py` from backend root
+- Fixed ISSUES.md Issue #1: `GasketService` now serializes responses before `commit()` (post-commit attribute expiration caused redundant SELECTs)
+- ruff surfaced two latent bugs, both fixed: `migrations/__init__.py` had a SyntaxError (`from migrations.001_... import` — digit-leading module name; any `import migrations` crashed), and `core/diophantine_generator.py` used `Counter` without importing it
+**Files changed**:
+- `backend/pyproject.toml` - New packaging/tooling config
+- `.github/workflows/ci.yml` - New CI pipeline
+- `backend/core/descartes.py` - sys.path hack removed, docstring example corrected
+- `backend/core/gasket_generator.py` - Dead code removed
+- `backend/services/gasket_service.py` - Issue #1 fix (response-before-commit)
+- `backend/migrations/__init__.py` - SyntaxError fix (ERR-007)
+- `backend/core/diophantine_generator.py` - Missing Counter import
+- `backend/db/base.py`, `db/models/*.py`, `api/*.py` - sys.path hacks removed, unused imports cleaned
+- 7 scratch scripts deleted
+**Tests added**:
+- `backend/tests/test_descartes.py` - Rewritten: 16 tests incl. Descartes quadratic-identity checks
+**Status**: ✅ Complete
+**Notes**: `ruff check` and `mypy` now pass clean; 178 fast-suite tests green in ~1.6s.
+
+---
+
+### [2026-06-11 06:40] Revamp Milestone 1: Exact Inversive-Coordinate Engine
+**What was done**: Implemented the new generation engine (`backend/core/engine/`) per REVAMP_BLUEPRINT.md Phase 2.0/M1: inversive coordinates, Apollonian group reflections, exact seed construction, and a duplicate-free reduced-word walk.
+**Specifics**:
+- `inversive.py`: circles/lines as augmented curvature-center 4-vectors (b̄, b, bx, by); exact invariants Q(v) = −1 and tangency B(v,w) = 1 — no float tolerances anywhere
+- `group.py`: swap reflections Sⱼ: vⱼ ← 2(vₐ+v_b+v_c) − vⱼ (ℤ-linear, square-root free); coefficient matrices for involution tests
+- `seeds.py`: named presets, Descartes-quadruple validation + canonical exact placement, curvature-triple completion, Apollonian strip (lines as b=0 vectors); the only square roots in the system are taken here, at seed time; every seed verified by exact identities
+- `walk.py`: BFS over reduced words (free product ℤ/2⁴) — every circle emitted exactly once, O(1) exact arithmetic per circle; budgets for depth/curvature/count (curvature pruning cuts subtrees → basis for viewport-driven generation in M2)
+- `metrics.py`: integral-bend extraction, residues mod m, prime-bend tagging
+- Integral packings stay in pure machine/big integers end-to-end (verified by test); irrational seeds carry SymPy scalars through linear ops only (no simplify in the loop)
+**Performance**: depth-10 classic gasket = 118,100 circles in ~0.5s (M1 acceptance: <1s). Legacy generator needed minutes for depth 5 and >60s for depth 3 with irrational seeds (Issue #5).
+**Files changed**:
+- `backend/core/engine/{__init__,inversive,group,seeds,walk,metrics}.py` - New engine (~900 lines), mypy --strict clean
+- `backend/core/__init__.py` - New package init documenting engine vs legacy-oracle split
+- `ISSUES.md` - #1 marked fixed; #2/#3/#5 noted as structurally resolved in the engine (legacy path retirement tracked for M2)
+- `DEBUG_LOG.md` - ERR-007, ERR-008 added
+**Tests added**:
+- `backend/tests/engine/test_inversive.py` - Construction, exact invariants, accessors (20 tests)
+- `backend/tests/engine/test_group.py` - Known bends (15,6,6,3), exact reflected coordinates, involution Sⱼ²=id (incl. matrix form over ℤ), invariants along seeded random reduced words
+- `backend/tests/engine/test_seeds.py` - Quadruple validation, pinned exact placements, triple completion (incl. (1,1,1) → 3−2√3), strip
+- `backend/tests/engine/test_walk.py` - 4·3^(g−1) generation law, duplicate-freedom, pinned gen-2 bend multiset [6,6,11,11,14,14,15,23,23,35,38,38], (−11,21,24,28) gen-1 bends, strip walk, budgets, depth-10 perf gate
+- `backend/tests/engine/test_metrics.py` - Residues mod 24 of classic packing = {2,3,6,11,14,15,18,23}, prime bends
+**Status**: ✅ Complete
+**Notes**: 70 engine tests, all exact-equality (no tolerances). Next: Milestone 2 — switch `GasketService`/WebSocket to the engine, schema v2, viewport-driven generation.
+
+---
+
 ## Statistics
 
-**Total Entries**: 21
-**Completed**: 21
+**Total Entries**: 23
+**Completed**: 23
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-11-17 10:45
+**Last Updated**: 2026-06-11 06:40
