@@ -16,7 +16,7 @@ from fractions import Fraction
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from core.gasket_generator import generate_apollonian_gasket
+from core.engine_adapter import generate_circles
 from schemas import GasketCreate
 
 router = APIRouter()
@@ -132,11 +132,11 @@ async def websocket_gasket_generate(websocket: WebSocket):
         batch_size = 10
 
         try:
-            # Use streaming generator
-            for circle_data in generate_apollonian_gasket(
+            # Stream from the exact inversive-coordinate engine
+            # (REVAMP_BLUEPRINT.md Milestone 2)
+            for circle_data in generate_circles(
                 curvature_fractions,
                 validated.max_depth,
-                stream=True
             ):
                 batch.append(circle_data.to_dict())
                 total_circles += 1

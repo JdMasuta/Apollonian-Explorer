@@ -332,6 +332,62 @@ singleton classes (Zero, One) as lacking the full Integer surface.
 
 ---
 
+#### [ERR-009] 2026-06-11 - API requests with irrational seeds take minutes despite fast engine
+**Error Message**:
+```
+(no exception — pytest tests/test_api_gaskets.py ran 10+ minutes;
+cProfile: 12.6s for 56 circles, 97% under sympy/simplify/simplify.py:435)
+```
+**Context**: After switching the service layer to core/engine, API tests with
+irrational seeds (e.g. curvatures (1,2,2)) were still extremely slow even
+though the engine walk itself took 0.1s.
+**Root Cause**: The legacy `CircleData.to_dict`/`to_database_dict` route every
+scalar through `exact_math` helpers (`to_numerator_denominator`,
+`format_exact`, `smart_divide`, `is_sympy_rational`) that each call
+`sympy.simplify()` — ~0.23s per circle, multiplied over hundreds of circles
+per request and dozens of tests.
+**Solution**: Added `EngineCircleData` in `core/engine_adapter.py` overriding
+`radius`/`to_dict`/`to_database_dict` with simplify-free serialization
+(engine output is already in normal form; SymPy scalars need a single
+`float()` evalf for the lossy INTEGER columns and plain `str()` for the
+tagged TEXT columns). (1,2,2) at depth 5: 488 circles incl. serialization in
+1.5s; rational seeds 0.01s.
+**Prevention**: Never call `sympy.simplify` per-value in serialization paths;
+keep normal-form guarantees in the producer. Schema v2 (Milestone 2) removes
+this serialization layer entirely.
+**Related**: ERR-008; ISSUES.md Issue #5
+**Files Changed**:
+- `backend/core/engine_adapter.py` - EngineCircleData fast serialization
+
+---
+
+#### [ERR-010] 2026-06-11 - Seed construction hangs on rational triples with irrational completion
+**Error Message**:
+```
+(no exception — seed_from_triple(3/2, 5/3, 7/4) ran > 20s without returning;
+pytest test_create_gasket_fraction_curvatures hung the API suite)
+```
+**Context**: Engine seed placement for curvature triples whose Descartes
+completion is irrational (e.g. (3/2, 5/3, 7/4) → k₄ = 59/12 − √1158/6).
+**Root Cause**: `sympy.nsimplify` was used as the canonicalizer in
+`seeds._norm` / `InversiveCircle.from_curvature_center`. nsimplify performs
+*constant recognition* (searching for closed forms), which is effectively
+unbounded on nested radical quotients like the tangency-distance expressions
+1/(a − b√c) that arise during placement.
+**Solution**: Replaced `nsimplify` with `radsimp` (rationalize denominators)
+for coordinate normalization and `simplify` where a boolean decision is
+needed. The hanging seed now constructs in 0.5s and verifies exactly.
+**Prevention**: Never use `nsimplify` for canonicalization — it is a
+constant-recognition search, not a simplifier. Use `radsimp`/`cancel`/
+`simplify` with known cost profiles; keep all SymPy canonicalization out of
+per-circle hot paths (seed-time only).
+**Related**: ERR-009
+**Files Changed**:
+- `backend/core/engine/seeds.py`, `backend/core/engine/inversive.py`,
+  `backend/core/engine/metrics.py` - nsimplify → radsimp/simplify
+
+---
+
 ### WebSocket Errors
 
 *No errors logged yet*

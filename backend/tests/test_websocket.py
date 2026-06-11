@@ -29,7 +29,7 @@ class TestWebSocketGasketGenerate:
 
     def test_websocket_valid_generation_request(self):
         """Test successful gasket generation with valid parameters."""
-        with patch('api.endpoints.websocket.generate_apollonian_gasket') as mock_gen:
+        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
             # Create mock circle data
             mock_circles = [
                 CircleData(
@@ -211,7 +211,7 @@ class TestWebSocketGasketGenerate:
 
     def test_websocket_batch_streaming(self):
         """Test that circles are streamed in batches."""
-        with patch('api.endpoints.websocket.generate_apollonian_gasket') as mock_gen:
+        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
             # Create 25 mock circles (should result in 3 messages: 10, 10, 5)
             mock_circles = []
             for i in range(25):
@@ -266,7 +266,7 @@ class TestWebSocketGasketGenerate:
 
     def test_websocket_generation_error(self):
         """Test error handling during generation."""
-        with patch('api.endpoints.websocket.generate_apollonian_gasket') as mock_gen:
+        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
             # Make generator raise an exception
             def raise_error():
                 raise ValueError("Test generation error")
@@ -288,7 +288,7 @@ class TestWebSocketGasketGenerate:
 
     def test_websocket_progress_message_format(self):
         """Test that progress messages have correct format."""
-        with patch('api.endpoints.websocket.generate_apollonian_gasket') as mock_gen:
+        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
             mock_circles = [
                 CircleData(
                     curvature=Fraction(1),

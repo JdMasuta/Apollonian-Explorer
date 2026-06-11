@@ -1279,10 +1279,50 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-11 07:15] Revamp Milestone 2 (slice 1): Service Layer on the Exact Engine
+**What was done**: Switched gasket generation in the API service layer and WebSocket endpoint from the legacy SymPy/BFS generator to the new exact engine, via a thin adapter that preserves the CircleData persistence/serialization contract.
+**Specifics**:
+- New `core/engine_adapter.py`: `generate_circles(curvatures, max_depth, max_circles)` — builds a seed (triple completion or quadruple placement) and streams `CircleData` from the reduced-word walk
+- `EngineCircleData` overrides `to_dict`/`to_database_dict`/`radius` with simplify-free serialization: the legacy exact_math helpers called `sympy.simplify` per scalar (~0.23s/circle, ERR-009); irrational seed (1,2,2) depth 5 now serves 488 circles in ~1.5s (was minutes), rational seeds in ~0.01s
+- `services/gasket_service.py` and `api/endpoints/websocket.py` now consume the adapter; legacy `generate_apollonian_gasket` no longer has production callers (retained for its test suite as an oracle)
+- New capability: 4-curvature seeds now work end-to-end (legacy raised NotImplementedError); quadruples are validated against the Descartes relation with clear errors
+- Semantics note: `generation` now means reduced word length; 3-curvature seeds are completed with the minus (enclosing) branch, the other completion appears at generation 1 — coverage identical, labels shift
+- Fixed a seed-construction hang (ERR-010): `sp.nsimplify` on nested radicals (e.g. seed (3/2, 5/3, 7/4)) ran unboundedly; replaced with `radsimp`/`simplify` — that seed now constructs in 0.5s
+**Files changed**:
+- `backend/core/engine_adapter.py` - New bridge module with EngineCircleData fast serialization
+- `backend/services/gasket_service.py` - Engine-backed generation; removed dead diophantine import
+- `backend/api/endpoints/websocket.py` - Engine-backed streaming
+- `backend/core/engine/{inversive,seeds,metrics}.py` - nsimplify → radsimp/simplify
+- `backend/tests/test_websocket.py` - Mock patch targets renamed to generate_circles
+- `.github/workflows/ci.yml` - API/WebSocket test files restored to the blocking run (now fast)
+**Tests added**:
+- `backend/tests/engine/test_adapter.py` - 9 tests: triple/quadruple seeds, exact centers, caps, error paths, DB-dict roundtrip
+**Results**: full backend CI suite (301 tests) passes in ~8s; test_api_gaskets.py alone went from unfinishable (15+ min) to 6.3s.
+**Status**: ✅ Complete
+**Notes**: Remaining M2 work (schema v2 with inversive coordinates + group words, viewport-driven lazy generation, worker-process WebSocket generation) tracked in REVAMP_BLUEPRINT.md.
+
+---
+
+### [2026-06-11 07:50] Revamp Milestone 3 (slice 1): Frontend Lint & Type Debt
+**What was done**: Cleared all frontend ESLint errors (17 → 0) and the latent null-pointer bug the typing exposed.
+**Specifics**:
+- `GasketCanvas.tsx`: typed Konva refs/events (`Konva.Stage`, `KonvaEventObject<WheelEvent|MouseEvent>`) replacing `any`; the strict typing surfaced that `stage.getPointerPosition()` can return null mid-zoom — added a guard
+- `websocketService.test.ts`: replaced `@ts-ignore` + `(global as any)` WebSocket mocking with `vi.stubGlobal`; `simulateMessage(data: unknown)`
+- `websocketService.ts`, `App.tsx`: removed remaining `any`/unused bindings
+- Vitest WebSocket-service failures (11) are pre-existing Issue #4 (stale port expectations from the Vite-proxy change + fake-timer interplay) — unchanged count, still tracked for the M3 rendering overhaul; CI keeps the vitest step non-blocking until then
+**Files changed**:
+- `frontend/src/components/GasketCanvas/GasketCanvas.tsx` - Konva typing + null guard
+- `frontend/src/services/websocketService.test.ts` - typed global mocking
+- `frontend/src/services/websocketService.ts`, `frontend/src/App.tsx` - lint cleanup
+**Status**: ✅ Complete (lint/types); ⚠️ vitest rehab deferred to M3 proper
+**Notes**: `npx eslint .` now reports 0 errors (2 hook-dependency warnings remain, non-failing); `tsc -b` clean.
+
+---
+
 ## Statistics
 
-**Total Entries**: 23
-**Completed**: 23
+**Total Entries**: 25
+**Completed**: 25
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-11 06:40
+**Last Updated**: 2026-06-11 07:50

@@ -27,15 +27,13 @@ jobs:
       - name: Type-check engine (mypy --strict)
         run: |
           if [ -d core/engine ]; then mypy; fi
-      # The three ignored files exercise the legacy SymPy generator and take
-      # many minutes each (ISSUES.md Issue #5). Milestone 2 switches the
-      # service layer to core/engine and restores them to the blocking run.
+      # test_gasket_generator.py exercises the retired legacy SymPy generator
+      # (kept as a cross-check oracle) and takes many minutes (ISSUES.md
+      # Issue #5); it is excluded until the legacy module is removed.
       - name: Tests
         run: >
           python -m pytest tests/ -q
           --ignore=tests/test_gasket_generator.py
-          --ignore=tests/test_api_gaskets.py
-          --ignore=tests/test_websocket.py
 
   frontend:
     runs-on: ubuntu-latest

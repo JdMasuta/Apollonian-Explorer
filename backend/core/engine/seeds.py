@@ -77,7 +77,7 @@ def complete_triple(k1: Exact, k2: Exact, k3: Exact) -> Tuple[Exact, Exact]:
             raise ValueError(f"No real Descartes completion: discriminant {disc} < 0")
         root = _rational_sqrt(disc)
     else:
-        disc_s = sp.nsimplify(disc)
+        disc_s = sp.simplify(disc)
         if disc_s.is_negative:
             raise ValueError(f"No real Descartes completion: discriminant {disc_s} < 0")
         root = from_sympy_scalar(sp.sqrt(disc_s))
@@ -249,7 +249,7 @@ def _norm(value: Exact) -> Exact:
     if isinstance(value, Fraction) and value.denominator == 1:
         return value.numerator
     if isinstance(value, sp.Expr):
-        return from_sympy_scalar(sp.nsimplify(sp.expand(value)))
+        return from_sympy_scalar(sp.radsimp(sp.expand(value)))
     return value
 
 
@@ -272,7 +272,7 @@ def _inv_abs(k: Exact) -> Exact:
 def _is_negative(k: Exact) -> bool:
     if isinstance(k, (int, Fraction)):
         return k < 0
-    result = sp.nsimplify(k).is_negative
+    result = sp.simplify(k).is_negative
     if result is None:
         return float(k) < 0
     return bool(result)
@@ -297,7 +297,7 @@ def _sqrt_nonneg(value: Exact) -> Exact:
         if value < 0:
             raise ValueError(f"Negative radicand {value}: configuration is not realizable")
         return _rational_sqrt(value)
-    value_s = sp.nsimplify(value)
+    value_s = sp.simplify(value)
     if value_s.is_negative:
         raise ValueError(f"Negative radicand {value_s}: configuration is not realizable")
     return from_sympy_scalar(sp.sqrt(value_s))

@@ -20,9 +20,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
 from db import Gasket, Circle
-from core.gasket_generator import generate_apollonian_gasket
-from core.diophantine_generator import generate_apollonian_gasket as generate_diophantine_gasket
-from core.circle_math import fraction_to_tuple
+from core.engine_adapter import generate_circles
 from core.exact_math import ExactNumber
 from schemas import GasketResponse, CircleResponse
 
@@ -202,11 +200,9 @@ class GasketService:
         # Preserves int type for integers, uses Fraction for rationals
         parsed_curvatures = [parse_curvature_string(c) for c in curvatures]
 
-        # Generate gasket using core algorithm
-        circles_data = list(
-            #generate_diophantine_gasket(parsed_curvatures, max_depth, stream=False)
-            generate_apollonian_gasket(parsed_curvatures, max_depth, stream=False)
-        )
+        # Generate gasket using the exact inversive-coordinate engine
+        # (REVAMP_BLUEPRINT.md Milestone 2: duplicate-free, square-root-free)
+        circles_data = list(generate_circles(parsed_curvatures, max_depth))
 
         # Create Gasket model
         gasket = Gasket(

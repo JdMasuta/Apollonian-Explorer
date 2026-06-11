@@ -25,7 +25,7 @@ def integer_bend(circle: InversiveCircle) -> Optional[int]:
     if isinstance(b, Fraction) and b.denominator == 1:
         return b.numerator
     if isinstance(b, sp.Expr):
-        simplified = sp.nsimplify(b)
+        simplified = sp.simplify(b)
         if isinstance(simplified, sp.Integer):
             return int(simplified)
     return None

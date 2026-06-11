@@ -75,7 +75,7 @@ def exact_str(value: Exact) -> str:
         return str(value)
     if isinstance(value, Fraction):
         return str(value)
-    return str(sp.nsimplify(value))
+    return str(sp.simplify(value))
 
 
 @dataclass(frozen=True)
@@ -113,10 +113,10 @@ class InversiveCircle:
         y_s = exact_to_sympy(y)
         cocurv_s = sp.expand(b_s * (x_s**2 + y_s**2) - 1 / b_s)
         return InversiveCircle(
-            from_sympy_scalar(sp.nsimplify(cocurv_s)),
+            from_sympy_scalar(sp.radsimp(cocurv_s)),
             curvature,
-            from_sympy_scalar(sp.nsimplify(b_s * x_s)),
-            from_sympy_scalar(sp.nsimplify(b_s * y_s)),
+            from_sympy_scalar(sp.radsimp(b_s * x_s)),
+            from_sympy_scalar(sp.radsimp(b_s * y_s)),
         )
 
     @staticmethod
@@ -248,7 +248,7 @@ def _demote_maybe(value: Exact) -> Exact:
     if isinstance(value, Fraction):
         return _demote(value)
     if isinstance(value, sp.Expr):
-        return from_sympy_scalar(sp.nsimplify(sp.expand(value)))
+        return from_sympy_scalar(sp.radsimp(sp.expand(value)))
     return value
 
 
