@@ -250,7 +250,10 @@ class WebSocketService {
           break;
 
         default:
-          console.warn('[WebSocket] Unknown message type:', (data as any).type);
+          console.warn(
+            '[WebSocket] Unknown message type:',
+            (data as { type?: string }).type
+          );
       }
     } catch (error) {
       console.error('[WebSocket] Failed to parse message:', error);

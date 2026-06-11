@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import { Stage, Layer, Circle as KonvaCircle } from 'react-konva';
+import type Konva from 'konva';
 import type { CircleData } from '../../services/websocketService';
 import {
   parseValue,
@@ -86,7 +87,7 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
     y: 0,
   });
 
-  const stageRef = useRef<any>(null);
+  const stageRef = useRef<Konva.Stage | null>(null);
   const [maxGeneration, setMaxGeneration] = useState(0);
 
   // Calculate max generation for coloring
@@ -128,7 +129,7 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
   /**
    * Handle wheel zoom.
    */
-  const handleWheel = (e: any) => {
+  const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
 
     const stage = stageRef.current;
@@ -136,6 +137,7 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
 
     const oldScale = transform.scale;
     const pointer = stage.getPointerPosition();
+    if (!pointer) return;
 
     // Mouse wheel delta (negative = zoom in, positive = zoom out)
     const delta = e.evt.deltaY;
@@ -175,7 +177,7 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
   /**
    * Handle canvas background click (deselect).
    */
-  const handleStageClick = (e: any) => {
+  const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     // Only deselect if clicking on the stage itself (not a shape)
     if (e.target === e.target.getStage()) {
       onCircleSelect(null);

@@ -55,7 +55,7 @@ class MockWebSocket {
   }
 
   // Helper method to simulate receiving a message
-  simulateMessage(data: any): void {
+  simulateMessage(data: unknown): void {
     if (this.onmessage) {
       const event = new MessageEvent('message', {
         data: JSON.stringify(data),
@@ -80,12 +80,11 @@ describe('WebSocketService', () => {
     vi.useFakeTimers();
 
     // Mock global WebSocket
-    mockWebSocket = null as any;
-    // @ts-ignore - Mocking global WebSocket for tests
-    (global as any).WebSocket = function (this: any, url: string) {
-      mockWebSocket = new MockWebSocket(url) as any;
-      return mockWebSocket as any;
-    };
+    mockWebSocket = null as unknown as MockWebSocket;
+    vi.stubGlobal('WebSocket', function (url: string) {
+      mockWebSocket = new MockWebSocket(url);
+      return mockWebSocket;
+    });
 
     // Reset service state by disconnecting
     websocketService.disconnect();
@@ -128,14 +127,13 @@ describe('WebSocketService', () => {
 
     it('should reject if connection fails', async () => {
       // Override mock to simulate connection failure
-      // @ts-ignore - Mocking global WebSocket for tests
-      (global as any).WebSocket = function (this: any, url: string) {
-        mockWebSocket = new MockWebSocket(url) as any;
+      vi.stubGlobal('WebSocket', function (url: string) {
+        mockWebSocket = new MockWebSocket(url);
         setTimeout(() => {
           mockWebSocket.simulateError();
         }, 0);
-        return mockWebSocket as any;
-      };
+        return mockWebSocket;
+      });
 
       const connectPromise = websocketService.connect();
       vi.advanceTimersByTime(0); // Advance timers to trigger error

@@ -52,7 +52,7 @@ function App() {
         await websocketService.connect();
         setIsConnected(true);
         setError(null);
-      } catch (err) {
+      } catch {
         setError('Failed to connect to server');
         setIsConnected(false);
       }
