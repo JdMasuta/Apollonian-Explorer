@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apollonian-backend"
+version = "0.1.0"
+description = "Apollonian Gasket exploration backend: exact-arithmetic generation engine and FastAPI service"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.4.0",
+    "pydantic-settings>=2.0.0",
+    "python-multipart>=0.0.6",
+    "websockets>=12.0",
+    "sympy>=1.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.25.0",
+    "ruff>=0.4.0",
+    "black>=24.0.0",
+    "mypy>=1.8.0",
+]
+
+[tool.setuptools]
+# The backend uses flat top-level packages (core, db, api, schemas, services).
+# A namespace-package rename is deferred; see REVAMP_BLUEPRINT.md Milestone 0.
+packages = ["core", "core.engine", "db", "db.models", "api", "api.endpoints", "schemas", "services", "migrations"]
+py-modules = ["config", "main"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "strict"
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Baseline: correctness-only rules so the legacy codebase passes; the new
+# engine (core/engine/) is held to the full default rule set.
+select = ["E9", "F63", "F7", "F82", "F401"]
+
+[tool.ruff.lint.per-file-ignores]
+# Legacy modules retain unused imports pending Milestone 1 retirement.
+"core/gasket_generator.py" = ["F401"]
+"core/diophantine_generator.py" = ["F401"]
+"core/circle_data.py" = ["F401"]
+"db/models/circle.py" = ["F401"]
+"services/gasket_service.py" = ["F401"]
+"tests/*" = ["F401"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Strict typing is enforced for the new engine only; legacy modules are
+# excluded until they are retired (REVAMP_BLUEPRINT.md M1).
+files = ["core/engine"]
+strict = true

@@ -7,11 +7,6 @@ Reference: .DESIGN_SPEC.md section 5 (REST API Endpoints)
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from api.deps import get_db
 from schemas import GasketCreate, GasketResponse
 from services import GasketService

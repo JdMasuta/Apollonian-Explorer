@@ -10,11 +10,6 @@ and other shared resources.
 from typing import Generator
 from sqlalchemy.orm import Session
 
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from db import SessionLocal
 
 

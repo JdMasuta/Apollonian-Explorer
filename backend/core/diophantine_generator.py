@@ -638,6 +638,8 @@ if __name__ == "__main__":
     # The initial 4 circles are (-2, 3, 6, 7)
     print("\n" + "="*50)
     print("Test 3: Generate depth-4 gasket with (-2, 3, 6, 7) seed")
+    from collections import Counter
+
     curvatures2 = [Fraction(-2), Fraction(3), Fraction(6), Fraction(7)]
     circles2 = list(generate_apollonian_gasket(curvatures2, max_depth=4, stream=False))
 

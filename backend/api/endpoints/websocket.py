@@ -11,16 +11,10 @@ circles in batches as they are generated.
 
 import asyncio
 import json
-from typing import List
 from fractions import Fraction
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
-
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from core.gasket_generator import generate_apollonian_gasket
 from schemas import GasketCreate

@@ -19,11 +19,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.sql import func
 
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from db.base import Base
 from core.exact_math import ExactNumber
 

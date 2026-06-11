@@ -19,11 +19,6 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from db import Gasket, Circle
 from core.gasket_generator import generate_apollonian_gasket
 from core.diophantine_generator import generate_apollonian_gasket as generate_diophantine_gasket
@@ -111,10 +106,13 @@ class GasketService:
                 # Cache hit! Update access tracking
                 existing_gasket.access_count += 1
                 existing_gasket.last_accessed_at = datetime.utcnow()
-                self.db.commit()
 
-                # Return cached gasket
-                return self._gasket_to_response(existing_gasket, max_depth)
+                # Build the response BEFORE committing: commit() expires ORM
+                # attributes, so serializing afterwards re-SELECTs the gasket
+                # and all circles (ISSUES.md Issue #1).
+                response = self._gasket_to_response(existing_gasket, max_depth)
+                self.db.commit()
+                return response
 
             else:
                 # Need to generate more depth
@@ -147,11 +145,12 @@ class GasketService:
         # Update access tracking
         gasket.access_count += 1
         gasket.last_accessed_at = datetime.utcnow()
-        self.db.commit()
 
-        # Return all cached circles
-        max_depth = gasket.max_depth_cached
-        return self._gasket_to_response(gasket, max_depth)
+        # Build the response BEFORE committing to avoid the post-commit
+        # attribute-expiration re-fetch (ISSUES.md Issue #1).
+        response = self._gasket_to_response(gasket, gasket.max_depth_cached)
+        self.db.commit()
+        return response
 
     def _generate_hash(self, curvatures: List[str]) -> str:
         """

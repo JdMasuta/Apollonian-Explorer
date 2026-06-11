@@ -4,7 +4,7 @@ Pydantic schemas for Circle API responses.
 Reference: .DESIGN_SPEC.md section 5 (API Endpoints) and API_USAGE_GUIDE.md
 """
 
-from typing import List, Optional, Dict
+from typing import List, Dict
 from pydantic import BaseModel, Field
 
 

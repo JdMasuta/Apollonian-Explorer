@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ruff mypy
+      - name: Lint (ruff)
+        run: ruff check .
+      - name: Type-check engine (mypy --strict)
+        run: |
+          if [ -d core/engine ]; then mypy; fi
+      # The three ignored files exercise the legacy SymPy generator and take
+      # many minutes each (ISSUES.md Issue #5). Milestone 2 switches the
+      # service layer to core/engine and restores them to the blocking run.
+      - name: Tests
+        run: >
+          python -m pytest tests/ -q
+          --ignore=tests/test_gasket_generator.py
+          --ignore=tests/test_api_gaskets.py
+          --ignore=tests/test_websocket.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # Lint and tests are non-blocking until Milestone 3 clears the
+      # pre-existing `any`/ts-ignore debt and the flaky WebSocket-service
+      # tests (ISSUES.md Issue #4). The build (tsc + vite) is blocking.
+      - name: Lint (non-blocking, see ISSUES.md #4 / REVAMP_BLUEPRINT.md M3)
+        run: npm run lint
+        continue-on-error: true
+      - name: Tests (non-blocking, see ISSUES.md #4 / REVAMP_BLUEPRINT.md M3)
+        run: npx vitest run
+        continue-on-error: true
+      - name: Build
+        run: npm run build

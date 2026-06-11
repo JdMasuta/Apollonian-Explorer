@@ -323,44 +323,30 @@ def _initialize_three_circles(curvatures: List[Fraction]) -> List[CircleData]:
     # Distance is computed exactly based on tangency type
     d12 = _compute_tangent_distance(k1, k2)
 
-    # Handle degenerate case: if d12 == 0, circles are concentric
-    # Place circle 2 at a small offset to allow solving for circle 3
+    # Degenerate case: d12 == 0 means the circles are concentric and no
+    # mutually tangent triple exists.
     if d12 == 0:
         raise ValueError("Cannot initialize three circles with two concentric circles (d12=0).")
-        # For concentric circles, place c2 at origin but c3 will be positioned radially
-        # This is a special configuration (e.g., outer circle with same-radius inner circle)
-        c2_pos = (Fraction(0), Fraction(0))
-        c2 = CircleData(
-            curvature=k2,
-            center=c2_pos,
-            generation=0,
-            parent_ids=[],
-        )
 
-        # For this degenerate case, position c3 based on tangency with c1 only
-        d13 = _compute_tangent_distance(k1, k3)
-        # Place c3 on positive x-axis at distance d13 from origin
-        c3_pos = (d13, Fraction(0))
-    else:
-        c2_pos = (d12, Fraction(0))
-        c2 = CircleData(
-            curvature=k2,
-            center=c2_pos,
-            generation=0,
-            parent_ids=[],
-        )
+    c2_pos = (d12, Fraction(0))
+    c2 = CircleData(
+        curvature=k2,
+        center=c2_pos,
+        generation=0,
+        parent_ids=[],
+    )
 
-        # Circle 3: solve for exact position using symbolic math
-        # This solves the system of equations:
-        # distance(c1, c3) = tangent_distance(k1, k3)
-        # distance(c2, c3) = tangent_distance(k2, k3)
-        try:
-            c3_pos = _solve_third_circle_position_exact(k1, k2, k3, c1_pos, c2_pos)
-        except ValueError as e:
-            # If symbolic solving fails, raise with context
-            raise ValueError(
-                f"Cannot compute exact tangent position for curvatures {k1}, {k2}, {k3}: {e}"
-            )
+    # Circle 3: solve for exact position using symbolic math
+    # This solves the system of equations:
+    # distance(c1, c3) = tangent_distance(k1, k3)
+    # distance(c2, c3) = tangent_distance(k2, k3)
+    try:
+        c3_pos = _solve_third_circle_position_exact(k1, k2, k3, c1_pos, c2_pos)
+    except ValueError as e:
+        # If symbolic solving fails, raise with context
+        raise ValueError(
+            f"Cannot compute exact tangent position for curvatures {k1}, {k2}, {k3}: {e}"
+        )
 
     c3 = CircleData(
         curvature=k3,
