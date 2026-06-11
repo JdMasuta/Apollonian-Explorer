@@ -94,8 +94,19 @@ The current implementation only checks for duplicates against the global `circle
 
 ### Issue #4: Frontend WebSocket Service Test Timing Issues
 
-**Status:** Needs Fix (Non-Critical)
+**Status:** ✅ Fixed (2026-06-11)
 **Priority:** Low (Tests, Service Code Works Correctly)
+
+**Resolution:** The test suite was rewritten with real timers and a
+deterministic async MockWebSocket (no fake-timer macrotask juggling): 19/19
+pass in ~50ms. Investigation also disproved "Service Code Works Correctly":
+the service had a real connection-lifecycle bug — React StrictMode's dev
+mount/unmount/mount cycle aborted the first connect and then wedged the
+service in `isConnecting`, so the page showed a WebSocket error and never
+connected (DEBUG_LOG ERR-011). `connect()` is now idempotent (in-flight
+promise shared) and `disconnect()` fully resets state; the cycle is covered
+by a regression test. Cross-stack message-schema contract tests were added in
+`backend/tests/test_ws_contract.py`.
 
 **Description**
 

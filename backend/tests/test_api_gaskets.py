@@ -36,7 +36,10 @@ def db_session():
 
     Provides isolated test environment with clean database state.
     """
-    # Create tables
+    # Drop BEFORE creating as well: the tests share the dev gaskets.db, so a
+    # previously running dev server may have left rows behind. Cleaning only
+    # after each test is not enough for the first test of a session.
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
     # Create session

@@ -49,14 +49,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci
-      # Lint and tests are non-blocking until Milestone 3 clears the
-      # pre-existing `any`/ts-ignore debt and the flaky WebSocket-service
-      # tests (ISSUES.md Issue #4). The build (tsc + vite) is blocking.
-      - name: Lint (non-blocking, see ISSUES.md #4 / REVAMP_BLUEPRINT.md M3)
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
-      - name: Tests (non-blocking, see ISSUES.md #4 / REVAMP_BLUEPRINT.md M3)
+      - name: Tests
         run: npx vitest run
-        continue-on-error: true
       - name: Build
         run: npm run build

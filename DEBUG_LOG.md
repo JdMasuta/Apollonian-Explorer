@@ -390,7 +390,63 @@ per-circle hot paths (seed-time only).
 
 ### WebSocket Errors
 
-*No errors logged yet*
+#### [ERR-011] 2026-06-11 - Frontend never connects: StrictMode mount cycle wedges WebSocketService
+**Error Message**:
+```
+(browser console) WebSocket connection to 'ws://.../ws/gasket/generate'
+failed: WebSocket is closed before the connection is established.
+(app state) 'Failed to connect to server'; no activity on the backend.
+```
+**Context**: Loading the frontend page in development. main.tsx wraps the app
+in <StrictMode>, which in dev runs every effect as mount → cleanup → mount.
+App.tsx connects the WebSocket in a mount effect and disconnects in cleanup.
+**Root Cause**: Two service bugs compounding:
+1. `disconnect()` closed the socket while it was still CONNECTING (browsers
+   then log the "closed before the connection is established" error) but did
+   NOT reset the `isConnecting` flag.
+2. The second mount's `connect()` saw `isConnecting === true` and rejected
+   with 'Connection already in progress' — so the app permanently showed
+   disconnected and no request ever reached the backend.
+**Solution**: Made `connect()` idempotent — concurrent callers share the
+in-flight promise instead of rejecting; `onclose` rejects pending connect
+attempts cleanly; `disconnect()` fully resets state so a fresh `connect()`
+succeeds. Regression-tested ('survives the React StrictMode
+mount/unmount/mount cycle') and verified live through the Vite proxy with an
+abort-then-reconnect cycle.
+**Prevention**: Any resource acquired in a React mount effect WILL go through
+mount/cleanup/mount in dev StrictMode — connection managers must treat
+connect/disconnect/connect as a normal sequence, not an error. Cover the
+cycle in unit tests.
+**Related**: ISSUES.md Issue #4; ERR-012
+**Files Changed**:
+- `frontend/src/services/websocketService.ts` - idempotent connect, full reset
+- `frontend/src/services/websocketService.test.ts` - rewritten suite (19 tests)
+
+---
+
+#### [ERR-012] 2026-06-12 - dev:backend never starts when backend/venv is missing
+**Error Message**:
+```
+sh: 1: .: venv/bin/activate: not found
+[0] npm run dev:backend exited with code 127
+(then: WebSocket/API errors in the browser, no backend terminal output)
+```
+**Context**: Running `npm run dev` (or scripts/dev.sh) on a checkout without
+`backend/venv` (e.g. dependencies installed system-wide or setup.sh not run).
+**Root Cause**: The root package.json hard-required the venv:
+`cd backend && . venv/bin/activate && uvicorn ...` — if activation fails the
+backend silently never starts, while the frontend comes up normally. The
+browser then shows WebSocket errors with *no backend activity*, which looks
+like a connection bug rather than a missing process.
+**Solution**: dev:backend now activates the venv only if present, falls back
+to the system Python environment, and fails loudly with an actionable message
+if uvicorn is missing.
+**Prevention**: Dev orchestration scripts should degrade gracefully and print
+actionable errors; when debugging "no backend activity", first verify the
+backend process actually started (curl /health).
+**Related**: ERR-011
+**Files Changed**:
+- `package.json` - resilient dev:backend script
 
 ---
 

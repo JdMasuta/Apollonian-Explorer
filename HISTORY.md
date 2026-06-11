@@ -1319,10 +1319,32 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 22:55] WebSocket Connection Audit & Cross-Stack Communication Tests
+**What was done**: Investigated the reported browser WebSocket error with no backend activity; found and fixed two real bugs; rebuilt the frontend WebSocket test suite and added cross-stack protocol contract tests.
+**Specifics**:
+- Verified the wiring live: backend (uvicorn :8000) + Vite dev server (:5173) + `/ws` proxy round-trip a full generation (direct and proxied), including an abort-mid-handshake → reconnect cycle, with backend logging the accepted socket
+- **Bug 1 (ERR-011, the reported symptom)**: React StrictMode's dev mount→cleanup→mount cycle closed the socket while CONNECTING (browser logs "closed before the connection is established") and left `isConnecting` stuck, so the remount's `connect()` rejected and the app stayed disconnected. Fixed: `connect()` is idempotent (shares the in-flight promise), `onclose` rejects pending attempts, `disconnect()` fully resets state
+- **Bug 2 (ERR-012, the "no backend activity")**: root `dev:backend` script hard-required `backend/venv`; without it the backend silently never started while the frontend came up. Now falls back to system Python and fails loudly with instructions
+- Unified WebSocket URL derivation: always same-origin (Vite proxy in dev, backend static host in prod) with `VITE_WS_URL` override — removed the hardcoded `ws://localhost:8000` production fallback
+- Rewrote `websocketService.test.ts`: real timers, deterministic async mock — 19/19 in ~50ms (was 11/17 failing, Issue #4), including a StrictMode-cycle regression test and in-flight-connect sharing
+- Added `backend/tests/test_ws_contract.py`: 8 tests driving the real endpoint and pinning every message shape (progress/complete/error, CircleData fields, "num/denom" string format, non-zero denominators) to the frontend TypeScript interfaces
+- CI: frontend lint and vitest steps are now blocking (previously continue-on-error)
+**Files changed**:
+- `frontend/src/services/websocketService.ts` - connection lifecycle fixes, same-origin URL
+- `frontend/src/services/websocketService.test.ts` - rewritten suite (19 tests)
+- `backend/tests/test_ws_contract.py` - new cross-stack contract tests (8 tests)
+- `package.json` - resilient dev:backend
+- `.github/workflows/ci.yml` - frontend lint/tests blocking
+- `ISSUES.md` (#4 fixed), `DEBUG_LOG.md` (ERR-011, ERR-012)
+**Status**: ✅ Complete
+**Notes**: Backend suite 309 tests / ~9s; frontend 19/19; build + eslint clean. If the browser error persists after pulling: check `curl localhost:8000/health` first — ERR-012 means the backend may simply not be running.
+
+---
+
 ## Statistics
 
-**Total Entries**: 25
-**Completed**: 25
+**Total Entries**: 26
+**Completed**: 26
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-11 07:50
+**Last Updated**: 2026-06-12 22:55
