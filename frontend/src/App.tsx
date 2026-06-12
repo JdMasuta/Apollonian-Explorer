@@ -27,6 +27,7 @@ import { parseValue } from './components/GasketCanvas/utils';
 import ColorMetricPicker from './components/ResearchPanel/ColorMetricPicker';
 import ExportButtons from './components/ResearchPanel/ExportButtons';
 import AnalyticsPanel from './components/ResearchPanel/AnalyticsPanel';
+import TransformPanel from './components/ResearchPanel/TransformPanel';
 
 /**
  * Resolution bound sent to the backend: circles smaller than roughly half a
@@ -137,6 +138,7 @@ function App() {
       deepenStateRef.current = null;
       rendererClient.clear();
       setSelectedCircle(null);
+      useGasketStore.getState().setTransformedView(false);
       setError(null);
       setGenerating(true);
       setProgress(0);
@@ -198,6 +200,7 @@ function App() {
     const state = useGasketStore.getState();
     const currentGasket = state.gasket;
     if (!currentGasket || state.isGenerating || deepenBusyRef.current) return;
+    if (state.transformedView) return; // transient Möbius view: no deepening
 
     const desired = Math.max(vp.minRadius, DEEPEN_MIN_RADIUS_FLOOR);
     const last = deepenStateRef.current;
@@ -268,6 +271,32 @@ function App() {
             rendererClient.addCircles((await deepenRes.json()).circles);
           }
           if (fineEnough) break;
+        }
+
+        // Cusp fallback (ISSUES.md #6): tree-depth deepening stalls at
+        // tangency points (parabolic fixed points). If detail is still
+        // coarse and big tangent circles dominate the view, generate their
+        // chains via the exact parabolic closed form.
+        const anchorsNow = await rendererClient.smallestVisible(1);
+        if (anchorsNow.length === 0 || anchorsNow[0].radius > desired * 8) {
+          const big = await rendererClient.largestVisible(3);
+          for (let i = 0; i < big.length; i += 1) {
+            for (let j = i + 1; j < big.length; j += 1) {
+              const res = await fetch(`/api/gaskets/${meta.id}/cusp-chain`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  word_a: big[i].word,
+                  word_b: big[j].word,
+                  min_radius: desired,
+                }),
+              });
+              if (res.ok) {
+                rendererClient.addCircles((await res.json()).circles);
+              }
+              // non-tangent pairs return 400: skipped silently
+            }
+          }
         }
       }
       deepenStateRef.current = { minRadius: desired, vp };
@@ -378,6 +407,7 @@ function App() {
                   <Stack spacing={1.5}>
                     <ColorMetricPicker />
                     <ExportButtons gasketId={gasket?.id ?? null} />
+                    <TransformPanel gasketId={gasket?.id ?? null} />
                   </Stack>
                 </Box>
               </Stack>

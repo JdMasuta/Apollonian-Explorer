@@ -77,3 +77,50 @@ def reflection_coefficients(j: int) -> Tuple[Tuple[int, int, int, int], ...]:
             row = tuple(-1 if m == j else 2 for m in range(4))
         rows.append((row[0], row[1], row[2], row[3]))
     return tuple(rows)
+
+
+def invert(mirror: InversiveCircle, target: InversiveCircle) -> InversiveCircle:
+    """Inversion of ``target`` in the circle (or line) ``mirror``.
+
+    Circle inversion is the Lorentz reflection across the mirror's vector in
+    the Descartes form (Q(mirror) = -1):
+
+        R(w) = w + 2·B(w, mirror)·mirror
+
+    Exact and linear; preserves Q and all pairwise inner products, so it maps
+    packings to packings. Inverting in the unit circle at the origin swaps
+    curvature and co-curvature (the definition of co-curvature). Member
+    circles through the mirror's center map to lines (b = 0).
+    """
+    factor = 2 * mirror.inner(target)
+    return InversiveCircle(
+        target.cocurvature + factor * mirror.cocurvature,
+        target.curvature + factor * mirror.curvature,
+        target.kx + factor * mirror.kx,
+        target.ky + factor * mirror.ky,
+    )
+
+
+def dual_circle(quartet: Quartet, j: int) -> InversiveCircle:
+    """The dual circle D_j through the three tangency points of the circles
+    other than j: D_j = (va + vb + vc − vj)/2.
+
+    D_j is orthogonal to va, vb, vc (B = 0) and satisfies Q(D_j) = −1;
+    inversion in D_j realizes the swap Sj as a Möbius action on the whole
+    plane (invert(D_j, vj) == reflect(quartet, j)). The four D_j generate the
+    dual Apollonian group; for integral packings their coordinates are
+    half-integers.
+    """
+    if not 0 <= j <= 3:
+        raise ValueError(f"Quartet index must be 0-3, got {j}")
+    from fractions import Fraction
+
+    vj = quartet[j]
+    a, b, c = (quartet[m] for m in range(4) if m != j)
+    half = Fraction(1, 2)
+    return InversiveCircle(
+        (a.cocurvature + b.cocurvature + c.cocurvature - vj.cocurvature) * half,
+        (a.curvature + b.curvature + c.curvature - vj.curvature) * half,
+        (a.kx + b.kx + c.kx - vj.kx) * half,
+        (a.ky + b.ky + c.ky - vj.ky) * half,
+    )

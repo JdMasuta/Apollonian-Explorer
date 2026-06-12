@@ -29,7 +29,7 @@ from pydantic import ValidationError
 from core.engine.walk import GeneratedCircle, WalkBudget, walk
 from schemas import GasketCreate
 from services.gasket_service import build_seed, parse_curvature_string, persist_walk_records
-from services.serializers import record_to_api_circle
+from services.serializers import record_to_api
 
 router = APIRouter()
 
@@ -46,16 +46,13 @@ def generate_records(
 ) -> Iterator[GeneratedCircle]:
     """Seed and walk a packing from API curvature strings.
 
-    Module-level seam so tests can patch generation. Lines (only possible
-    from strip seeds, which the API schema rejects) are skipped defensively.
+    Module-level seam so tests can patch generation. Lines (from strip
+    seeds) stream with the additive kind="line" wire shape.
     """
     parsed = [parse_curvature_string(c) for c in curvatures]
     seed = build_seed(parsed)
     budget = WalkBudget(max_depth=max_depth, min_radius=min_radius)
-    for record in walk(seed, budget):
-        if record.circle.is_line:
-            continue
-        yield record
+    yield from walk(seed, budget)
 
 
 def _produce(
@@ -79,7 +76,7 @@ def _produce(
         for record in generate_records(curvatures, max_depth, min_radius):
             if stop.is_set():
                 return
-            batch.append(record_to_api_circle(record))
+            batch.append(record_to_api(record))
             records.append(record)
             last_generation = record.generation
             total += 1

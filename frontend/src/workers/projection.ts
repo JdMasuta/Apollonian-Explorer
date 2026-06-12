@@ -42,7 +42,8 @@ export type ColorMetric =
   | { kind: 'residue'; modulus: number }
   | { kind: 'parity' }
   | { kind: 'prime' }
-  | { kind: 'limb' };
+  | { kind: 'limb' }
+  | { kind: 'orbit'; prefix: string };
 
 /** Integer bend from a "num/denom" wire string, when integral and safe. */
 export function integerBend(curvature: string): number | null {
@@ -106,6 +107,13 @@ export class ProjectionIndex {
   private bends: (number | null)[] = [];
   private primeFlags: (boolean | null)[] = []; // lazy cache
 
+  // Lines (b = 0): <p, n> = d, stored as floats (strip-scale geometry).
+  private lineWords: string[] = [];
+  private lineNx: number[] = [];
+  private lineNy: number[] = [];
+  private lineD: number[] = [];
+  private lineGen: number[] = [];
+
   private maxGeneration = 0;
   private minRadius = Infinity;
   private bounds: Bounds | null = null;
@@ -116,7 +124,7 @@ export class ProjectionIndex {
   private cachedOriginKey: string | null = null;
 
   get count(): number {
-    return this.words.length;
+    return this.words.length + this.lineWords.length;
   }
 
   clear(): void {
@@ -130,6 +138,11 @@ export class ProjectionIndex {
     this.ids = [];
     this.bends = [];
     this.primeFlags = [];
+    this.lineWords = [];
+    this.lineNx = [];
+    this.lineNy = [];
+    this.lineD = [];
+    this.lineGen = [];
     this.maxGeneration = 0;
     this.minRadius = Infinity;
     this.bounds = null;
@@ -148,6 +161,19 @@ export class ProjectionIndex {
     for (const circle of circles) {
       const word = circle.word ?? `anon-${this.words.length}`;
       if (this.wordSet.has(word)) {
+        continue;
+      }
+      if (circle.kind === 'line' && circle.normal && circle.offset !== undefined) {
+        this.wordSet.add(word);
+        this.lineWords.push(word);
+        this.lineNx.push(toNumber(fromString(circle.normal.x)));
+        this.lineNy.push(toNumber(fromString(circle.normal.y)));
+        this.lineD.push(toNumber(fromString(circle.offset)));
+        this.lineGen.push(circle.generation);
+        added += 1;
+        if (circle.generation > this.maxGeneration) {
+          this.maxGeneration = circle.generation;
+        }
         continue;
       }
       const x = fromString(circle.center.x);
@@ -238,6 +264,48 @@ export class ProjectionIndex {
       out[base + 2] = rPx;
       out[base + 3] = this.metricT(i, metric, genScale, maxLogB);
       m += 1;
+    }
+
+    // Lines render as huge pseudo-circles through the same SDF pipeline:
+    // center = foot-of-canvas-center + n*R, radius R; |dist - R| traces the
+    // line to sub-pixel accuracy for any on-screen segment.
+    if (this.lineWords.length > 0) {
+      const R = 1e7;
+      const originXf = toNumber(parsed.originX);
+      const originYf = toNumber(parsed.originY);
+      const p0x = width / 2;
+      const p0y = height / 2;
+      const lineOut = new Float32Array(this.lineWords.length * FRAME_STRIDE);
+      let lm = 0;
+      for (let i = 0; i < this.lineWords.length; i += 1) {
+        const nx = this.lineNx[i];
+        const ny = this.lineNy[i];
+        const ds =
+          (this.lineD[i] - (nx * originXf + ny * originYf)) * scale +
+          nx * cx +
+          ny * cy;
+        const distToCenter = Math.abs(nx * p0x + ny * p0y - ds);
+        if (distToCenter > Math.hypot(width, height)) continue;
+        const footX = p0x + (ds - (nx * p0x + ny * p0y)) * nx;
+        const footY = p0y + (ds - (nx * p0x + ny * p0y)) * ny;
+        const base = lm * FRAME_STRIDE;
+        lineOut[base] = footX + nx * R;
+        lineOut[base + 1] = footY + ny * R;
+        lineOut[base + 2] = R;
+        lineOut[base + 3] =
+          metric.kind === 'orbit'
+            ? this.lineWords[i].startsWith(metric.prefix)
+              ? 1
+              : 0
+            : this.lineGen[i] * genScale;
+        lm += 1;
+      }
+      if (lm > 0) {
+        const merged = new Float32Array((m + lm) * FRAME_STRIDE);
+        merged.set(out.slice(0, m * FRAME_STRIDE), 0);
+        merged.set(lineOut.slice(0, lm * FRAME_STRIDE), m * FRAME_STRIDE);
+        return { buffer: merged, count: m + lm, selected };
+      }
     }
     return { buffer: out.slice(0, m * FRAME_STRIDE), count: m, selected };
   }
@@ -347,7 +415,20 @@ export class ProjectionIndex {
         const j = Number(letter);
         return Number.isFinite(j) ? j / 3 : 0;
       }
+      case 'orbit':
+        return this.words[i].startsWith(metric.prefix) ? 1 : 0;
     }
+  }
+
+  /** The N largest circles intersecting the viewport (cusp-chain anchors). */
+  largestVisible(
+    camera: CameraMessage,
+    width: number,
+    height: number,
+    limit: number
+  ): { word: string; radius: number }[] {
+    const all = this.smallestVisible(camera, width, height, Number.MAX_SAFE_INTEGER);
+    return all.slice(-limit).reverse();
   }
 
   // ------------------------------------------------------------------

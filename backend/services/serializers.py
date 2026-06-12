@@ -153,3 +153,65 @@ def row_to_response(row: Circle) -> CircleResponse:
         parent_ids=[],
         tangent_ids=[],
     )
+
+
+def parse_exact(value: str):
+    """Parse a stored canonical exact string back to int/Fraction/SymPy."""
+    try:
+        frac = Fraction(value)
+        return frac.numerator if frac.denominator == 1 else frac
+    except (ValueError, ZeroDivisionError):
+        import sympy as sp
+
+        return sp.sympify(value)
+
+
+def row_to_inversive(row: Circle):
+    """Reconstruct the exact inversive vector from a schema-v2 row."""
+    from core.engine.inversive import InversiveCircle
+
+    return InversiveCircle(
+        parse_exact(row.cocurvature_exact),
+        parse_exact(row.curvature_exact),
+        parse_exact(row.kx_exact),
+        parse_exact(row.ky_exact),
+    )
+
+
+def vec_to_api_line(circle, word: str, generation: int) -> Dict[str, object]:
+    """Serialize a line (b = 0) to the additive 'line' wire shape.
+
+    Inversive line vector: (2d, 0, nx, ny) for the line <p, n> = d.
+    """
+    def frac_str_of(value: Exact, mirror: float) -> str:
+        frac = _exact_or_float(value, mirror)
+        return _frac_str(frac)
+
+    nx_f = float(circle.kx)
+    ny_f = float(circle.ky)
+    if isinstance(circle.cocurvature, (int, Fraction)):
+        d_value: Exact = Fraction(circle.cocurvature) / 2
+    else:
+        d_value = circle.cocurvature / 2
+    return {
+        "kind": "line",
+        "id": None,
+        "curvature": "0/1",
+        "center": {"x": "0/1", "y": "0/1"},
+        "radius": "0/1",
+        "normal": {"x": frac_str_of(circle.kx, nx_f), "y": frac_str_of(circle.ky, ny_f)},
+        "offset": frac_str_of(d_value, float(circle.cocurvature) / 2.0),
+        "generation": generation,
+        "word": word,
+        "parent_ids": [],
+        "tangent_ids": [],
+    }
+
+
+def record_to_api(record: GeneratedCircle, circle_id: Optional[int] = None) -> Dict[str, object]:
+    """Serialize any walk record (circle or line) to its wire shape."""
+    if record.circle.is_line:
+        return vec_to_api_line(record.circle, db_word(record), record.generation)
+    payload = record_to_api_circle(record, circle_id)
+    payload["kind"] = "circle"
+    return payload

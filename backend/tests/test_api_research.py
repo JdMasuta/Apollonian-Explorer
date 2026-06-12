@@ -295,3 +295,91 @@ class TestExport:
 
     def test_missing_gasket_404(self, client):
         assert client.get("/api/gaskets/99999/export").status_code == 404
+
+
+class TestCuspChainEndpoint:
+    """Parabolic cusp refinement (ISSUES.md #6 / M5)."""
+
+    def test_cusp_chain_persists_and_returns(self, client, gasket_id):
+        before = client.get(f"/api/gaskets/{gasket_id}/circles").json()["count"]
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/cusp-chain",
+            json={"word_a": "S1", "word_b": "S2", "min_radius": 1e-5},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["verified_words"] is True
+        assert data["count"] > 50
+        bends = sorted(
+            int(c["curvature"].split("/")[0]) for c in data["circles"]
+        )
+        assert bends[:4] == [3, 15, 15, 35]  # 4n^2-1, both directions
+        after = client.get(f"/api/gaskets/{gasket_id}/circles").json()["count"]
+        assert after > before
+
+    def test_cusp_chain_idempotent(self, client, gasket_id):
+        first = client.post(
+            f"/api/gaskets/{gasket_id}/cusp-chain",
+            json={"word_a": "S1", "word_b": "S2", "min_radius": 1e-4},
+        ).json()
+        second = client.post(
+            f"/api/gaskets/{gasket_id}/cusp-chain",
+            json={"word_a": "S1", "word_b": "S2", "min_radius": 1e-4},
+        ).json()
+        assert first["added"] > 0
+        assert second["added"] == 0
+
+    def test_non_tangent_rejected(self, client, gasket_id):
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/cusp-chain",
+            json={"word_a": "S3", "word_b": "3", "min_radius": 1e-3},
+        )
+        assert response.status_code == 400
+
+
+class TestTransformEndpoint:
+    """Möbius inversion of the packing (M5)."""
+
+    def test_invert_in_bounding_circle(self, client, gasket_id):
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/transform",
+            json={"mirror_word": "S0"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mirror_word"] == "S0"
+        assert data["count"] == 164
+        # The two bend-2 circles pass through the origin -> become lines
+        assert data["lines"] == 2
+        kinds = {c["kind"] for c in data["circles"]}
+        assert kinds == {"circle", "line"}
+        assert all(c["word"].startswith("T:") for c in data["circles"])
+
+    def test_unknown_mirror_rejected(self, client, gasket_id):
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/transform",
+            json={"mirror_word": "012301"},
+        )
+        assert response.status_code == 400
+
+
+class TestStripPacking:
+    """The Apollonian strip (0,0,1,1) end-to-end (M5)."""
+
+    def test_strip_creates_with_lines(self, client):
+        response = client.post(
+            "/api/gaskets",
+            json={"curvatures": ["0", "0", "1", "1"], "max_depth": 3, "min_radius": 0.05},
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["num_circles"] > 4
+        # REST circle list omits lines; bends are the Ford-like integers
+        bends = sorted(set(int(c["curvature"].split("/")[0]) for c in data["circles"]))
+        assert bends[0] == 1 and 4 in bends
+
+    def test_other_zero_configs_rejected(self, client):
+        response = client.post(
+            "/api/gaskets", json={"curvatures": ["0", "1", "1"], "max_depth": 2}
+        )
+        assert response.status_code == 422

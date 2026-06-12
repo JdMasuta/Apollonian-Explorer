@@ -27,6 +27,7 @@ export type WorkerRequest =
     }
   | { type: 'hitTest'; sx: number; sy: number; requestId: number }
   | { type: 'smallestVisible'; limit: number; requestId: number }
+  | { type: 'largestVisible'; limit: number; requestId: number }
   | { type: 'bounds'; requestId: number };
 
 export type WorkerResponse =
@@ -126,9 +127,11 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
       scope.postMessage({ type: 'hitResult', requestId: message.requestId, circle });
       break;
     }
+    case 'largestVisible':
     case 'smallestVisible': {
+      const fn = message.type === 'largestVisible' ? 'largestVisible' : 'smallestVisible';
       const circles = lastCamera
-        ? index.smallestVisible(
+        ? index[fn](
             lastCamera.camera,
             lastCamera.width,
             lastCamera.height,

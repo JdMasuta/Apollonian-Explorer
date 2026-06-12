@@ -1409,10 +1409,24 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 21:00] Revamp Milestone 5: Group-Action Explorer
+**What was done**: Möbius machinery on inversive coordinates, parabolic cusp acceleration (closes ISSUES #6), strip packings end-to-end, and the TransformPanel UI.
+**Specifics — engine (all exact, all tested)**:
+- `group.invert(mirror, target)`: circle inversion as the Lorentz reflection w + 2B(w,m)·m — involution, preserves Q and all pairwise inner products; inverting in the unit circle swaps curvature↔cocurvature (the definition); members through the mirror's center map to lines
+- `group.dual_circle(quartet, j)` = (Σothers − vⱼ)/2: orthogonal to the fixed three, Q=−1, and invert(D_j, vⱼ) == reflect(quartet, j) — the dual Apollonian group realizing the swaps as Möbius actions (half-integer coordinates for integral packings)
+- `cusp.py`: the chain recurrence C_{n+1} = 2(A+B+C_n) − C_{n−1} solved in closed form C_n = C_0 + nV + n²(A+B); chain words constructed by slot-letter alternation and replay-verified (0 mismatches against the tree walk) — O(1) per element where the tree needs O(n)
+**Specifics — API**: POST /gaskets/{id}/cusp-chain (persists under tree words, idempotent); POST /gaskets/{id}/transform (transient inversion of the cached packing, 'T:'-prefixed identities, lines serialized); strip configuration (0,0,1,1) accepted end-to-end (schema, build_seed→seed_strip, kind="line" wire shape over WS)
+**Specifics — frontend**: worker renders lines as huge pseudo-circles through the same SDF pipeline (no renderer changes); 'orbit (word prefix)' coloring metric; TransformPanel (invert-in-selected / restore, deepening disabled in transformed views); deepening loop falls back to cusp chains when tree refinement stalls at a tangency point; largestVisible worker query
+**Verified live**: strip streams 2 lines + 302 circles; inversion in the bounding circle returns 164 images with exactly 2 lines (the bend-2 circles through the origin); cusp chain to bend 1,052,675 (4n²−1) with verified words in milliseconds.
+**Tests**: backend 368 (test_cusp.py: inversion involution/invariants, dual-group realization, chain bends/words/speed; endpoint suites for cusp/transform/strip); frontend 61; mypy --strict/ruff/eslint/tsc/build clean.
+**Status**: ✅ Complete — only M6 (hardening & release) remains. S₃/S₄ quartet permutation controls were dropped deliberately: they relabel the quartet without changing the circle set (visual no-op).
+
+---
+
 ## Statistics
 
-**Total Entries**: 30
-**Completed**: 30
+**Total Entries**: 31
+**Completed**: 31
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 12:00
+**Last Updated**: 2026-06-12 21:00

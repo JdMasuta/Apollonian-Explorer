@@ -19,17 +19,27 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from core.engine.seeds import seed_from_quadruple, seed_from_triple
+from core.engine.cusp import cusp_chain
+from core.engine.group import invert
+from core.engine.seeds import seed_from_quadruple, seed_from_triple, seed_strip
 from core.engine.walk import WalkBudget, replay_word, walk
 from core.exact_math import ExactNumber
 from db import Circle, Gasket
 from schemas import CircleResponse, GasketResponse
 from services.serializers import (
     db_word,
+    record_to_api,
     record_to_api_circle,
     record_to_row,
+    row_to_inversive,
     row_to_response,
+    vec_to_api_line,
 )
+
+def _float_frac_str(value: float) -> str:
+    frac = Fraction(value).limit_denominator(10**15)
+    return f"{frac.numerator}/{frac.denominator}"
+
 
 #: Hard cap on circles a single deepen request may produce (server defense
 #: against shallow-word + deep-resolution requests).
@@ -54,6 +64,9 @@ def build_seed(curvatures: List[ExactNumber]):
     if len(curvatures) == 3:
         return seed_from_triple(curvatures[0], curvatures[1], curvatures[2])
     if len(curvatures) == 4:
+        if sorted(curvatures, key=float) == [0, 0, 1, 1]:
+            # The Apollonian strip: two parallel lines + two unit circles.
+            return seed_strip()
         return seed_from_quadruple(
             curvatures[0], curvatures[1], curvatures[2], curvatures[3]
         )
@@ -308,6 +321,116 @@ class GasketService:
             "count": len(circles),
             "added": added,
             "truncated": truncated,
+            "circles": circles,
+        }
+
+    def deepen_cusp(
+        self,
+        gasket_id: int,
+        word_a: str,
+        word_b: str,
+        min_radius: float,
+    ) -> Optional[dict]:
+        """Parabolic cusp-chain refinement around the tangency of two circles.
+
+        Reference: ISSUES.md #6 / REVAMP_BLUEPRINT.md M5. O(1) exact closed
+        form per chain element (core.engine.cusp); new circles persist under
+        their verified tree words.
+        """
+        gasket = self.db.query(Gasket).filter(Gasket.id == gasket_id).first()
+        if not gasket:
+            return None
+
+        curvatures = json.loads(gasket.initial_curvatures)
+        seed = build_seed([parse_curvature_string(c) for c in curvatures])
+        result = cusp_chain(seed, word_a, word_b, min_radius)
+
+        words = [record.word for record in result.records]
+        existing = {
+            row[0]
+            for row in self.db.query(Circle.word).filter(
+                Circle.gasket_id == gasket.id, Circle.word.in_(words)
+            )
+        } if words else set()
+        added = 0
+        for record in result.records:
+            if record.word in existing:
+                continue
+            self.db.add(record_to_row(record, gasket.id))
+            added += 1
+        gasket.num_circles = (gasket.num_circles or 0) + added
+        self.db.commit()
+
+        return {
+            "gasket_id": gasket.id,
+            "count": len(result.records),
+            "added": added,
+            "verified_words": result.verified_words,
+            "circles": [record_to_api(record) for record in result.records],
+        }
+
+    def transform_packing(
+        self, gasket_id: int, mirror_word: str, limit: int = 20000
+    ) -> Optional[dict]:
+        """Invert the cached packing in one of its circles (Möbius action).
+
+        Reference: REVAMP_BLUEPRINT.md M5. Inversion is the exact Lorentz
+        reflection on inversive vectors; the result is a DIFFERENT packing,
+        so it is returned transiently (never persisted) with synthetic
+        'T:'-prefixed identities. Member circles through the mirror's center
+        map to lines (serialized with the additive 'line' shape).
+        """
+        gasket = self.db.query(Gasket).filter(Gasket.id == gasket_id).first()
+        if not gasket:
+            return None
+
+        mirror_row = (
+            self.db.query(Circle)
+            .filter(Circle.gasket_id == gasket_id, Circle.word == mirror_word)
+            .first()
+        )
+        if mirror_row is None:
+            raise ValueError(f"No cached circle with word {mirror_word!r}")
+        mirror = row_to_inversive(mirror_row)
+
+        rows = (
+            self.db.query(Circle)
+            .filter(Circle.gasket_id == gasket_id)
+            .order_by(Circle.generation, Circle.id)
+            .limit(limit)
+            .all()
+        )
+        circles = []
+        lines = 0
+        for row in rows:
+            image = invert(mirror, row_to_inversive(row))
+            word = f"T:{row.word}"
+            if image.is_line:
+                lines += 1
+                circles.append(vec_to_api_line(image, word, row.generation))
+                continue
+            b_f = float(image.curvature)
+            payload = {
+                "kind": "circle",
+                "id": None,
+                "curvature": _float_frac_str(b_f),
+                "center": {
+                    "x": _float_frac_str(float(image.kx) / b_f),
+                    "y": _float_frac_str(float(image.ky) / b_f),
+                },
+                "radius": _float_frac_str(1.0 / b_f),
+                "generation": row.generation,
+                "word": word,
+                "parent_ids": [],
+                "tangent_ids": [],
+            }
+            circles.append(payload)
+
+        return {
+            "gasket_id": gasket.id,
+            "mirror_word": mirror_word,
+            "count": len(circles),
+            "lines": lines,
             "circles": circles,
         }
 

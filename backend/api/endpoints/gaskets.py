@@ -204,6 +204,84 @@ def deepen_gasket(
     return result
 
 
+class CuspChainRequest(BaseModel):
+    """Parabolic refinement around the tangency point of two cached circles."""
+
+    word_a: str = Field(..., min_length=1, max_length=120, pattern=r"^(S[0-3]|[0-3]+)$")
+    word_b: str = Field(..., min_length=1, max_length=120, pattern=r"^(S[0-3]|[0-3]+)$")
+    min_radius: float = Field(..., gt=0)
+
+
+@router.post("/gaskets/{gasket_id}/cusp-chain")
+def cusp_chain_endpoint(
+    gasket_id: int,
+    request: CuspChainRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Generate the circle chain converging to the tangency point (cusp) of two
+    circles, via the exact parabolic closed form C_n = C_0 + nV + n²(A+B) —
+    O(1) per element where tree-walk deepening would need O(n) steps
+    (ISSUES.md #6). New circles persist under verified tree words.
+    """
+    service = GasketService(db)
+    try:
+        result = service.deepen_cusp(
+            gasket_id,
+            word_a=request.word_a,
+            word_b=request.word_b,
+            min_radius=request.min_radius,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_CUSP", "message": str(e)},
+        )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket {gasket_id} not found"},
+        )
+    return result
+
+
+class TransformRequest(BaseModel):
+    """Invert the cached packing in one of its circles."""
+
+    mirror_word: str = Field(..., min_length=1, max_length=130)
+    limit: int = Field(default=20000, ge=1, le=100000)
+
+
+@router.post("/gaskets/{gasket_id}/transform")
+def transform_endpoint(
+    gasket_id: int,
+    request: TransformRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Möbius action on the packing: exact inversion (Lorentz reflection on
+    inversive vectors) in the circle addressed by mirror_word. The result is
+    a different packing, returned transiently with 'T:'-prefixed identities;
+    circles through the mirror's center come back as kind="line".
+    """
+    service = GasketService(db)
+    try:
+        result = service.transform_packing(
+            gasket_id, mirror_word=request.mirror_word, limit=request.limit
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_MIRROR", "message": str(e)},
+        )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket {gasket_id} not found"},
+        )
+    return result
+
+
 @router.delete("/gaskets/{gasket_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_gasket(gasket_id: int, db: Session = Depends(get_db)):
     """

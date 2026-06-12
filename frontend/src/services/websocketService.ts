@@ -22,6 +22,12 @@ export interface CircleData {
   generation: number;
   /** Reduced word in the Apollonian group ('S0'-'S3' for seed circles). */
   word?: string;
+  /** 'circle' (default) or 'line' (b = 0, e.g. strip packings). */
+  kind?: 'circle' | 'line';
+  /** Unit normal of a line, as exact fraction strings. */
+  normal?: { x: string; y: string };
+  /** Signed offset d of a line <p, normal> = d. */
+  offset?: string;
   parent_ids: number[];
   tangent_ids: number[];
 }

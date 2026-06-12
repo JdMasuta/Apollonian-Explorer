@@ -17,17 +17,27 @@ const METRICS: { value: ColorMetric['kind']; label: string }[] = [
   { value: 'parity', label: 'Bend parity' },
   { value: 'prime', label: 'Prime bends' },
   { value: 'limb', label: 'Group generator limb' },
+  { value: 'orbit', label: 'Orbit (word prefix)' },
 ];
 
 export function ColorMetricPicker() {
   const [kind, setKind] = useState<ColorMetric['kind']>('generation');
   const [modulus, setModulus] = useState(24);
+  const [prefix, setPrefix] = useState('0');
 
-  const apply = (nextKind: ColorMetric['kind'], nextModulus: number) => {
-    const metric: ColorMetric =
-      nextKind === 'residue'
-        ? { kind: 'residue', modulus: Math.max(2, nextModulus) }
-        : ({ kind: nextKind } as ColorMetric);
+  const apply = (
+    nextKind: ColorMetric['kind'],
+    nextModulus: number,
+    nextPrefix: string
+  ) => {
+    let metric: ColorMetric;
+    if (nextKind === 'residue') {
+      metric = { kind: 'residue', modulus: Math.max(2, nextModulus) };
+    } else if (nextKind === 'orbit') {
+      metric = { kind: 'orbit', prefix: nextPrefix };
+    } else {
+      metric = { kind: nextKind } as ColorMetric;
+    }
     rendererClient.setMetric(metric);
   };
 
@@ -42,7 +52,7 @@ export function ColorMetricPicker() {
         onChange={(e) => {
           const next = e.target.value as ColorMetric['kind'];
           setKind(next);
-          apply(next, modulus);
+          apply(next, modulus, prefix);
         }}
       >
         {METRICS.map((m) => (
@@ -51,6 +61,19 @@ export function ColorMetricPicker() {
           </MenuItem>
         ))}
       </TextField>
+      {kind === 'orbit' && (
+        <TextField
+          size="small"
+          label="prefix"
+          sx={{ width: 110 }}
+          value={prefix}
+          onChange={(e) => {
+            const next = e.target.value.trim();
+            setPrefix(next);
+            apply('orbit', modulus, next);
+          }}
+        />
+      )}
       {kind === 'residue' && (
         <TextField
           size="small"
@@ -62,7 +85,7 @@ export function ColorMetricPicker() {
           onChange={(e) => {
             const next = Math.max(2, parseInt(e.target.value) || 24);
             setModulus(next);
-            apply('residue', next);
+            apply('residue', next, prefix);
           }}
         />
       )}

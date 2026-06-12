@@ -87,11 +87,14 @@ class GasketCreate(BaseModel):
                     f"Must be a valid fraction string (e.g., '1', '3/2'). Error: {e}"
                 )
 
-        # Check for zero curvatures (infinite radius circles not yet supported)
+        # Zero curvatures are lines. The only supported line configuration
+        # is the Apollonian strip (0, 0, 1, 1) — REVAMP_BLUEPRINT.md M5.
         if any(f == 0 for f in parsed_fractions):
-            raise ValueError(
-                "Zero curvatures (infinite radius circles) are not yet supported"
-            )
+            if sorted(parsed_fractions) != [0, 0, 1, 1]:
+                raise ValueError(
+                    "Zero curvatures (lines) are only supported as the "
+                    "Apollonian strip configuration (0, 0, 1, 1)"
+                )
 
         return v
 

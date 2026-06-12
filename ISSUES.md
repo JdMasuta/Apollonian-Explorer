@@ -316,8 +316,17 @@ Rationale:
 
 ### Issue #6: Cusp Zoom Requires Parabolic Acceleration
 
-**Status:** Open (by design for M3 Stage A; fix scheduled with Milestone 5)
+**Status:** ✅ Fixed (2026-06-12, Revamp Milestone 5)
 **Priority:** Medium (Research feature completeness)
+
+**Resolution:** `core/engine/cusp.py` solves the chain recurrence
+C_{n+1} = 2(A+B+C_n) − C_{n−1} in closed form — C_n = C_0 + nV + n²(A+B) —
+so cusp-chain element n costs O(1) exact operations (verified live: bends to
+1,052,675 in milliseconds). Chain circles persist under exact tree words
+(alternating slot letters, replay-verified, dedupe-sound against ordinary
+walks). Exposed as POST /api/gaskets/{id}/cusp-chain; the frontend deepening
+loop falls back to it automatically when tree-depth refinement stalls at a
+tangency point.
 
 **Description**
 

@@ -154,6 +154,15 @@ class RendererClient {
     }));
   }
 
+  /** Words of the N largest circles intersecting the current viewport. */
+  largestVisible(limit: number): Promise<{ word: string; radius: number }[]> {
+    return this.request<{ word: string; radius: number }[]>((requestId) => ({
+      type: 'largestVisible',
+      limit,
+      requestId,
+    }));
+  }
+
   getBounds(): Promise<Bounds | null> {
     return this.request<Bounds | null>((requestId) => ({ type: 'bounds', requestId }));
   }

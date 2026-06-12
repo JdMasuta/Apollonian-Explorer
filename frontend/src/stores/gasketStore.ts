@@ -36,6 +36,8 @@ interface GasketState {
 
   gasket: GasketMetadata | null;
   error: string | null;
+  /** True while showing a Möbius-transformed (transient) packing. */
+  transformedView: boolean;
 
   // Actions
   setCircleCount: (count: number) => void;
@@ -45,6 +47,7 @@ interface GasketState {
   setProgress: (progress: number) => void;
   setGasket: (gasket: GasketMetadata | null) => void;
   setError: (error: string | null) => void;
+  setTransformedView: (transformed: boolean) => void;
   reset: () => void;
 }
 
@@ -56,6 +59,7 @@ const initialState = {
   progress: 0,
   gasket: null,
   error: null,
+  transformedView: false,
 };
 
 export const useGasketStore = create<GasketState>((set) => ({
@@ -68,6 +72,7 @@ export const useGasketStore = create<GasketState>((set) => ({
   setProgress: (progress) => set({ progress }),
   setGasket: (gasket) => set({ gasket }),
   setError: (error) => set({ error }),
+  setTransformedView: (transformedView) => set({ transformedView }),
   reset: () => set(initialState),
 }));
 
