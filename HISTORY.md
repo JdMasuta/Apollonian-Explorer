@@ -1383,10 +1383,21 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 11:00] Revamp Milestone 3 Stage B: WebGL2 Instanced SDF Renderer
+**What was done**: Replaced the scene-graph rendering path entirely: circles draw as a single instanced WebGL2 batch with the outline evaluated as a signed-distance field per fragment — perfectly anti-aliased at any radius, ~10^5 instances per frame. Canvas2D fallback (same packed-frame input) for non-WebGL2 environments, exercised by unit tests.
+**Specifics**:
+- `frontend/src/renderer/circleRenderer.ts`: `WebGLCircleRenderer` (instanced unit quad, per-instance [sx, sy, rPx, colorT] uploaded directly from the projection worker's transferable frames — zero repacking; SDF ring fragment shader matching the blue→red palette; selection drawn as a second 1-instance call with orange stroke + translucent fill) and `Canvas2DCircleRenderer` (palette-bucketed stroke batching); `createCircleRenderer` picks WebGL2 with graceful fallback
+- `GasketCanvas.tsx`: react-konva removed — plain <canvas> with native non-passive wheel listener (React root wheel listeners are passive; preventDefault is required for zoom), manual drag/click handlers, renderer lifecycle effects
+- `konva` + `react-konva` uninstalled: bundle 776 KB → 476 KB (gzip 151 KB)
+**Tests**: renderer fallback suite added (59 frontend tests total); tsc/eslint/build clean.
+**Status**: ✅ Complete — Milestone 3 done (Stage A + B). M4 (research tooling + WS persistence) next per the approved plan.
+
+---
+
 ## Statistics
 
-**Total Entries**: 28
-**Completed**: 28
+**Total Entries**: 29
+**Completed**: 29
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 10:30
+**Last Updated**: 2026-06-12 11:00
