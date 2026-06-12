@@ -58,7 +58,7 @@ class Circle(Base):
 
     # Provenance
     generation: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    word: Mapped[str] = mapped_column(String(64), nullable=False)
+    word: Mapped[str] = mapped_column(String(128), nullable=False)
     is_line: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Exact inversive coordinates (lossless)

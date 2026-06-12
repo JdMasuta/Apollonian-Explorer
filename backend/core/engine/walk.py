@@ -141,7 +141,47 @@ def _record(
     )
 
 
-def walk(seed: Quartet, budget: WalkBudget = WalkBudget(max_depth=5)) -> Iterator[GeneratedCircle]:
+def replay_word(seed: Quartet, word: str) -> Tuple[Quartet, FloatQuartet]:
+    """Reconstruct the walk-tree node state for a reduced word.
+
+    Words are the circles' identities (schema v2), so any cached circle's
+    local neighborhood can be re-derived in O(len(word)) reflections — this
+    is what viewport-driven deepening resumes from.
+
+    Raises:
+        ValueError: for non-reduced words or invalid generator letters.
+    """
+    quartet = seed
+    floats: FloatQuartet = (
+        _float_vec(seed[0]),
+        _float_vec(seed[1]),
+        _float_vec(seed[2]),
+        _float_vec(seed[3]),
+    )
+    last = -1
+    for letter in word:
+        if letter not in "0123":
+            raise ValueError(f"Invalid generator letter {letter!r} in word {word!r}")
+        j = int(letter)
+        if j == last:
+            raise ValueError(f"Word {word!r} is not reduced (repeats generator {j})")
+        new_circle = reflect(quartet, j)
+        new_vec = _reflect_float(floats, j)
+        members = list(quartet)
+        members[j] = new_circle
+        quartet = (members[0], members[1], members[2], members[3])
+        new_floats = list(floats)
+        new_floats[j] = new_vec
+        floats = (new_floats[0], new_floats[1], new_floats[2], new_floats[3])
+        last = j
+    return quartet, floats
+
+
+def walk(
+    seed: Quartet,
+    budget: WalkBudget = WalkBudget(max_depth=5),
+    start_word: str = "",
+) -> Iterator[GeneratedCircle]:
     """Breadth-first spanning-tree walk of the packing.
 
     Yields every circle of the packing reachable within the budget exactly
@@ -149,31 +189,47 @@ def walk(seed: Quartet, budget: WalkBudget = WalkBudget(max_depth=5)) -> Iterato
 
     Args:
         seed: root quartet of mutually tangent circles (see core.engine.seeds).
-        budget: walk limits; the default stops at generation 5.
+        budget: walk limits; the default stops at generation 5. ``max_depth``
+            is an ABSOLUTE generation bound (word length), also with a
+            non-empty start_word.
+        start_word: resume the walk at this tree node instead of the root:
+            only circles whose words extend start_word are yielded (the
+            node's subtree — the packing detail local to that circle). The
+            four seed circles and the node circle itself are NOT re-yielded.
 
     Yields:
         GeneratedCircle records in BFS (generation) order.
     """
-    float_seed: FloatQuartet = (
-        _float_vec(seed[0]),
-        _float_vec(seed[1]),
-        _float_vec(seed[2]),
-        _float_vec(seed[3]),
-    )
-
-    count = 0
-    for index, circle in enumerate(seed):
-        if budget.max_circles is not None and count >= budget.max_circles:
+    if start_word:
+        quartet0, floats0 = replay_word(seed, start_word)
+        count = 0
+        if budget.max_depth is not None and len(start_word) >= budget.max_depth:
             return
-        yield _record(circle, float_seed[index], 0, "", index)
-        count += 1
+        queue: deque[Tuple[Quartet, FloatQuartet, int, int, str]] = deque()
+        queue.append(
+            (quartet0, floats0, int(start_word[-1]), len(start_word), start_word)
+        )
+    else:
+        float_seed: FloatQuartet = (
+            _float_vec(seed[0]),
+            _float_vec(seed[1]),
+            _float_vec(seed[2]),
+            _float_vec(seed[3]),
+        )
 
-    if budget.max_depth is not None and budget.max_depth <= 0:
-        return
+        count = 0
+        for index, circle in enumerate(seed):
+            if budget.max_circles is not None and count >= budget.max_circles:
+                return
+            yield _record(circle, float_seed[index], 0, "", index)
+            count += 1
 
-    # Queue entries: (exact quartet, float quartet, last generator, depth, word).
-    queue: deque[Tuple[Quartet, FloatQuartet, int, int, str]] = deque()
-    queue.append((seed, float_seed, -1, 0, ""))
+        if budget.max_depth is not None and budget.max_depth <= 0:
+            return
+
+        # Queue entries: (exact quartet, float quartet, last generator, depth, word).
+        queue = deque()
+        queue.append((seed, float_seed, -1, 0, ""))
 
     while queue:
         quartet, floats, last, depth, word = queue.popleft()

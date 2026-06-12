@@ -7,6 +7,7 @@ Reference: .DESIGN_SPEC.md section 5 (REST API Endpoints)
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.deps import get_db
@@ -54,6 +55,7 @@ def create_gasket(
             curvatures=gasket_data.curvatures,
             max_depth=gasket_data.max_depth,
             min_radius=gasket_data.min_radius,
+            include_circles=gasket_data.include_circles,
         )
         return gasket
 
@@ -144,6 +146,62 @@ def get_circles_in_viewport(
         )
 
     return {"gasket_id": gasket_id, "count": len(circles), "circles": circles}
+
+
+class DeepenRequest(BaseModel):
+    """Local refinement request: resume the walk at a circle's tree node."""
+
+    word: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        pattern=r"^(S[0-3]|[0-3]+)$",
+        description="Group word of the circle to refine around ('S0'-'S3' for seeds)",
+    )
+    min_radius: float = Field(
+        ..., gt=0, description="Resolution bound for the refinement (model units)"
+    )
+    max_extra_depth: int = Field(
+        default=24, ge=1, le=64, description="Generations to descend below the word"
+    )
+
+
+@router.post("/gaskets/{gasket_id}/deepen")
+def deepen_gasket(
+    gasket_id: int,
+    request: DeepenRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Refine the packing locally around a cached circle (deep-zoom support).
+
+    Resumes the generation walk at the tree node addressed by the circle's
+    group word, bounded by resolution; new circles are persisted and the
+    full local subtree (capped) is returned.
+
+    Reference: REVAMP_BLUEPRINT.md Milestone 3 (viewport-driven deepening).
+    """
+    service = GasketService(db)
+    try:
+        result = service.deepen(
+            gasket_id,
+            word=request.word,
+            min_radius=request.min_radius,
+            max_extra_depth=request.max_extra_depth,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_WORD", "message": str(e)},
+        )
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket with ID {gasket_id} not found"}
+        )
+
+    return result
 
 
 @router.delete("/gaskets/{gasket_id}", status_code=status.HTTP_204_NO_CONTENT)

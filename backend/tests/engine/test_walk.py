@@ -10,6 +10,8 @@ import time
 from collections import Counter
 from fractions import Fraction
 
+import pytest
+
 from core.engine.seeds import seed_from_preset, seed_strip
 from core.engine.walk import GeneratedCircle, WalkBudget, walk
 
@@ -211,6 +213,51 @@ class TestResolutionBudget:
     def test_min_radius_keeps_lines(self):
         circles = list(walk(seed_strip(), WalkBudget(max_depth=3, min_radius=0.2)))
         assert any(c.circle.is_line for c in circles)
+
+
+class TestSubtreeReplay:
+    """walk(start_word=...) resumes the tree at a word (deep-zoom deepening)."""
+
+    def test_replay_matches_prefix_filtered_full_walk(self):
+        from core.engine.walk import replay_word
+
+        seed = seed_from_preset("classic")
+        full = {
+            c.word: c
+            for c in walk(seed, WalkBudget(max_depth=4))
+            if c.word.startswith("0") and c.word != "0"
+        }
+        sub = {c.word: c for c in walk(seed, WalkBudget(max_depth=4), start_word="0")}
+        assert set(full) == set(sub)
+        for word, record in sub.items():
+            assert record.circle == full[word].circle
+            assert record.generation == full[word].generation
+        # Sanity: replay_word reproduces the exact node quartet
+        quartet, _ = replay_word(seed, "0")
+        assert quartet[0].curvature == 15
+
+    def test_replay_respects_budgets(self):
+        seed = seed_from_preset("classic")
+        records = list(
+            walk(seed, WalkBudget(max_depth=30, min_radius=0.001), start_word="03")
+        )
+        assert records
+        for record in records:
+            assert record.word.startswith("03")
+            assert record.r_f is not None and record.r_f >= 0.001
+
+    def test_replay_rejects_invalid_words(self):
+        from core.engine.walk import replay_word
+
+        seed = seed_from_preset("classic")
+        with pytest.raises(ValueError, match="not reduced"):
+            replay_word(seed, "00")
+        with pytest.raises(ValueError, match="Invalid generator"):
+            replay_word(seed, "0x1")
+
+    def test_start_word_beyond_max_depth_yields_nothing(self):
+        seed = seed_from_preset("classic")
+        assert list(walk(seed, WalkBudget(max_depth=2), start_word="012")) == []
 
 
 class TestPerformance:

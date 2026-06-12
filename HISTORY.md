@@ -1363,10 +1363,30 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 10:30] Revamp Milestone 3 Stage A: Exact Camera, Unclamped Deep Zoom, Word-Replay Deepening
+**What was done**: The rendering/deep-zoom overhaul, stage A of the approved M3 plan: BigInt-rational exact camera with origin rebasing, projection worker owning all circle geometry, single-shape imperative canvas (no per-circle nodes), and viewport-driven deepening that resumes the generation walk at a circle's group word.
+**Specifics — frontend**:
+- `src/math/rational.ts`: exact BigInt rationals; `toNumber` uses adaptive 63-bit scaling (a fixed 2^60 scale truncated tiny residuals — caught by tests) with a two-step descale for subnormal-range values
+- `src/camera/exactCamera.ts`: world anchor as exact rational; screen position = float(exact difference)·scale — pixel-exact at any zoom; pan offsets fold into the anchor beyond 4096px with no drift; **the 0.1–10× zoom clamp is gone**
+- `src/workers/projection.ts` + `mathWorker.ts` + `renderer/rendererClient.ts`: worker owns parsing/exact→relative conversion/culling/hit-testing/`smallestVisible`; main thread receives transferable Float32Array frames (latest-wins coalescing); zustand store slimmed to metadata (circleCount/selectedCircle)
+- `GasketCanvas.tsx` rewritten: ONE Konva Shape with sceneFunc batching strokes by palette bucket; manual pan/zoom/click handlers; math hit-test selection (by word — WS circles have no DB id); auto-fit until first user interaction
+- `App.tsx`: viewport-settle deepening — global ensure to 2e-3 resolution, then iterative local refinement (≤3 rounds, re-anchoring on the smallest visible circles) via the new deepen endpoint
+**Specifics — backend**:
+- `core/engine/walk.py`: `replay_word()` + `walk(start_word=...)` resume the spanning-tree walk at any node (subtree proven equal to the prefix-filtered full walk); schema words are tree addresses
+- `POST /api/gaskets/{id}/deepen` {word, min_radius, max_extra_depth}: local refinement, word-deduplicated persistence, `DEEPEN_MAX_CIRCLES=30000` server defense
+- Incremental cache expansion replaces delete-and-regenerate (`_expand`: union budget walk, insert only new words); `include_circles=false` POST flag + lazy circles relationship for payload-free ensures; `MAX_DENOMINATOR` 1e9→1e15 (full float64 wire precision); `max_depth` cap 15→64; word column 64→128
+**Why local deepening**: live testing showed a GLOBAL resolution of ε costs ~(1/ε)^1.3057 circles (2.5e-6 → ~10⁷ — unfinishable). Resuming at a viewport-scale word bounds each round by (viewport/pixel)^1.3057 regardless of absolute zoom.
+**Verified live (structure-chasing zoom simulation)**: viewport half-width 1 → 1.7e-10 with circles resolved to r=1.9e-13 (word length 34), 2 refinement rounds per ~3-decade jump; bottoms out at the designed 1e-13 wire floor.
+**Known limitation (recorded as ISSUES.md #6)**: zooming onto a *tangency point* (cusp) cannot be served by depth-bounded words — cusp chains have bends growing quadratically (word length ~ 1/viewport), a parabolic fixed point. Generic residual-set points have exponential bend growth (word ~ log(1/ε)) and work as verified. Fix belongs to M5: parabolic subgroup acceleration.
+**Tests**: backend 347 (replay/deepen/expansion/include_circles suites added); frontend 54 (rational/camera/projection suites added); mypy/ruff/eslint/tsc/build clean.
+**Status**: ✅ Complete (Stage A) / Stage B (WebGL instanced renderer) next
+
+---
+
 ## Statistics
 
-**Total Entries**: 27
-**Completed**: 27
+**Total Entries**: 28
+**Completed**: 28
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 04:30
+**Last Updated**: 2026-06-12 10:30

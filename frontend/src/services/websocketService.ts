@@ -20,6 +20,8 @@ export interface CircleData {
   };
   radius: string;
   generation: number;
+  /** Reduced word in the Apollonian group ('S0'-'S3' for seed circles). */
+  word?: string;
   parent_ids: number[];
   tangent_ids: number[];
 }

@@ -20,11 +20,20 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from core.engine.seeds import seed_from_quadruple, seed_from_triple
-from core.engine.walk import WalkBudget, walk
+from core.engine.walk import WalkBudget, replay_word, walk
 from core.exact_math import ExactNumber
 from db import Circle, Gasket
 from schemas import CircleResponse, GasketResponse
-from services.serializers import record_to_row, row_to_response
+from services.serializers import (
+    db_word,
+    record_to_api_circle,
+    record_to_row,
+    row_to_response,
+)
+
+#: Hard cap on circles a single deepen request may produce (server defense
+#: against shallow-word + deep-resolution requests).
+DEEPEN_MAX_CIRCLES = 30000
 
 
 def parse_curvature_string(s: str) -> ExactNumber:
@@ -66,31 +75,39 @@ class GasketService:
         curvatures: List[str],
         max_depth: int,
         min_radius: Optional[float] = None,
+        include_circles: bool = True,
     ) -> GasketResponse:
         """Create or retrieve a gasket from cache.
 
         A cached gasket covers the request when it was generated at least as
-        deep (max_depth) and at least as fine (min_radius) as requested;
-        otherwise it is regenerated.
+        deep (max_depth) and at least as fine (min_radius) as requested.
+        When coverage is insufficient, the cache is expanded INCREMENTALLY:
+        the walk reruns with the union budget and only circles with new
+        group words are inserted (UNIQUE(gasket_id, word) is the identity).
+
+        Args:
+            include_circles: when False, the response carries no circle list
+                (used by the deepening flow, which follows up with a
+                viewport query instead of downloading the whole packing).
         """
         gasket_hash = self._generate_hash(curvatures)
 
         existing = self.db.query(Gasket).filter(Gasket.hash == gasket_hash).first()
         if existing:
-            if self._covers(existing, max_depth, min_radius):
-                existing.access_count += 1
-                existing.last_accessed_at = datetime.utcnow()
-                # Build the response BEFORE committing: commit() expires ORM
-                # attributes (ISSUES.md Issue #1).
-                response = self._gasket_to_response(existing, max_depth, min_radius)
-                self.db.commit()
-                return response
-            # Insufficient depth/resolution: regenerate (MVP cache policy)
-            self.db.delete(existing)
+            if not self._covers(existing, max_depth, min_radius):
+                self._expand(existing, curvatures, max_depth, min_radius)
+            existing.access_count += 1
+            existing.last_accessed_at = datetime.utcnow()
+            # Build the response BEFORE committing: commit() expires ORM
+            # attributes (ISSUES.md Issue #1).
+            response = self._gasket_to_response(
+                existing, max_depth, min_radius, include_circles
+            )
             self.db.commit()
+            return response
 
         gasket = self._generate_and_persist(curvatures, max_depth, min_radius, gasket_hash)
-        return self._gasket_to_response(gasket, max_depth, min_radius)
+        return self._gasket_to_response(gasket, max_depth, min_radius, include_circles)
 
     def get_gasket(self, gasket_id: int) -> Optional[GasketResponse]:
         """Retrieve a gasket by ID with all cached circles."""
@@ -145,6 +162,81 @@ class GasketService:
         rows = query.order_by(Circle.generation, Circle.id).limit(limit).all()
         return [row_to_response(row) for row in rows]
 
+    def deepen(
+        self,
+        gasket_id: int,
+        word: str,
+        min_radius: float,
+        max_extra_depth: int = 24,
+    ) -> Optional[dict]:
+        """Locally refine the packing around a cached circle.
+
+        Resumes the walk at the tree node identified by ``word`` (schema v2
+        words ARE the tree addresses) with a resolution budget. This is how
+        deep zoom stays output-sensitive: a GLOBAL resolution of epsilon
+        costs ~(1/eps)^1.3057 circles, but the subtree below a
+        viewport-scale circle at the same epsilon is bounded by the
+        viewport/pixel ratio (REVAMP_BLUEPRINT.md M3).
+
+        New circles are persisted (word-deduplicated); ALL subtree circles
+        within the budget are returned so the client gets the full local
+        picture without a second query.
+
+        Returns None when the gasket doesn't exist; raises ValueError for
+        invalid words.
+        """
+        gasket = self.db.query(Gasket).filter(Gasket.id == gasket_id).first()
+        if not gasket:
+            return None
+
+        curvatures = json.loads(gasket.initial_curvatures)
+        parsed = [parse_curvature_string(c) for c in curvatures]
+        seed = build_seed(parsed)
+
+        # Seed words (S0..S3) have no subtree address: walk from the root.
+        start_word = "" if word.startswith("S") else word
+        if start_word:
+            # Fail fast on malformed words (replay also validates).
+            replay_word(seed, start_word)
+
+        absolute_depth = min(len(start_word) + max_extra_depth, 120)
+        budget = WalkBudget(
+            max_depth=absolute_depth,
+            min_radius=min_radius,
+            max_circles=DEEPEN_MAX_CIRCLES,
+        )
+        records = list(walk(seed, budget, start_word=start_word))
+        truncated = len(records) >= DEEPEN_MAX_CIRCLES
+
+        word_query = self.db.query(Circle.word).filter(Circle.gasket_id == gasket.id)
+        if start_word:
+            word_query = word_query.filter(Circle.word.like(f"{start_word}%"))
+        existing_words = {row[0] for row in word_query}
+
+        added = 0
+        for record in records:
+            if db_word(record) in existing_words:
+                continue
+            self.db.add(record_to_row(record, gasket.id))
+            added += 1
+        gasket.num_circles = (gasket.num_circles or 0) + added
+        if gasket.max_depth_cached is not None and absolute_depth > gasket.max_depth_cached:
+            gasket.max_depth_cached = absolute_depth
+        self.db.commit()
+
+        circles = [
+            record_to_api_circle(record)
+            for record in records
+            if not record.circle.is_line
+        ]
+        return {
+            "gasket_id": gasket.id,
+            "count": len(circles),
+            "added": added,
+            "truncated": truncated,
+            "circles": circles,
+        }
+
     def delete_gasket(self, gasket_id: int) -> bool:
         """Delete a gasket and its circles. True if a gasket was deleted."""
         gasket = self.db.query(Gasket).filter(Gasket.id == gasket_id).first()
@@ -172,6 +264,45 @@ class GasketService:
         fracs = sorted(Fraction(c) for c in curvatures)
         canonical = ",".join(f"{f.numerator}/{f.denominator}" for f in fracs)
         return hashlib.sha256(canonical.encode()).hexdigest()
+
+    def _expand(
+        self,
+        gasket: Gasket,
+        curvatures: List[str],
+        max_depth: int,
+        min_radius: Optional[float],
+    ) -> None:
+        """Expand a cached gasket to cover a deeper/finer budget incrementally.
+
+        Reruns the walk with the union of the cached and requested budgets
+        and inserts only circles whose word is not yet stored. After
+        expansion the gasket covers both the old and the new request.
+        """
+        union_depth = max(gasket.max_depth_cached or 0, max_depth)
+        if gasket.min_radius_cached is None or min_radius is None:
+            union_min_radius = None
+        else:
+            union_min_radius = min(gasket.min_radius_cached, min_radius)
+
+        parsed = [parse_curvature_string(c) for c in curvatures]
+        seed = build_seed(parsed)
+        budget = WalkBudget(max_depth=union_depth, min_radius=union_min_radius)
+
+        existing_words = {
+            row[0]
+            for row in self.db.query(Circle.word).filter(Circle.gasket_id == gasket.id)
+        }
+        added = 0
+        for record in walk(seed, budget):
+            if db_word(record) in existing_words:
+                continue
+            self.db.add(record_to_row(record, gasket.id))
+            added += 1
+
+        gasket.max_depth_cached = union_depth
+        gasket.min_radius_cached = union_min_radius
+        gasket.num_circles = (gasket.num_circles or 0) + added
+        self.db.flush()
 
     def _generate_and_persist(
         self,
@@ -204,22 +335,28 @@ class GasketService:
         return gasket
 
     def _gasket_to_response(
-        self, gasket: Gasket, max_depth: int, min_radius: Optional[float]
+        self,
+        gasket: Gasket,
+        max_depth: int,
+        min_radius: Optional[float],
+        include_circles: bool = True,
     ) -> GasketResponse:
         """Serialize a gasket with circles filtered to the requested budget."""
-        circles = [
-            row_to_response(row)
-            for row in gasket.circles
-            if row.generation <= max_depth
-            and not row.is_line
-            and (min_radius is None or (row.r_f or 0.0) >= min_radius)
-        ]
+        circles: List[CircleResponse] = []
+        if include_circles:
+            circles = [
+                row_to_response(row)
+                for row in gasket.circles
+                if row.generation <= max_depth
+                and not row.is_line
+                and (min_radius is None or (row.r_f or 0.0) >= min_radius)
+            ]
 
         return GasketResponse(
             id=gasket.id,
             hash=gasket.hash,
             initial_curvatures=json.loads(gasket.initial_curvatures),
-            num_circles=len(circles),
+            num_circles=len(circles) if include_circles else (gasket.num_circles or 0),
             max_depth_cached=gasket.max_depth_cached,
             created_at=gasket.created_at.isoformat() if gasket.created_at else "",
             last_accessed_at=(

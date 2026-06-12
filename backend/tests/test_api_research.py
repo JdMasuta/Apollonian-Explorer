@@ -122,6 +122,116 @@ class TestResolutionAwareCaching:
         assert coarse["id"] == fine["id"]
         assert coarse["num_circles"] <= fine["num_circles"]
 
+    def test_expansion_is_incremental(self, client):
+        """A deeper request keeps the same gasket id and existing circle ids
+        (rows are added, not regenerated)."""
+        shallow = client.post(
+            "/api/gaskets", json={"curvatures": ["-1", "2", "2"], "max_depth": 2}
+        ).json()
+        shallow_ids = {c["id"] for c in shallow["circles"]}
+
+        deeper = client.post(
+            "/api/gaskets", json={"curvatures": ["-1", "2", "2"], "max_depth": 4}
+        ).json()
+
+        assert deeper["id"] == shallow["id"]
+        assert deeper["num_circles"] == 164  # full depth-4 count
+        deeper_ids = {c["id"] for c in deeper["circles"]}
+        assert shallow_ids <= deeper_ids, "expansion must keep existing rows"
+
+    def test_include_circles_false(self, client):
+        """The deepening flow gets metadata without the circle payload."""
+        response = client.post(
+            "/api/gaskets",
+            json={
+                "curvatures": ["-1", "2", "2"],
+                "max_depth": 4,
+                "include_circles": False,
+            },
+        ).json()
+        assert response["circles"] == []
+        assert response["num_circles"] == 164  # total cached, not payload size
+
+    def test_deep_depth_with_resolution(self, client):
+        """max_depth up to 64 works when bounded by min_radius."""
+        response = client.post(
+            "/api/gaskets",
+            json={
+                "curvatures": ["-1", "2", "2"],
+                "max_depth": 40,
+                "min_radius": 0.01,
+                "include_circles": False,
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["num_circles"] > 164
+
+
+class TestDeepen:
+    """Local refinement around a cached circle (deep-zoom support)."""
+
+    def test_deepen_returns_and_persists_local_detail(self, client, gasket_id):
+        before = client.get(f"/api/gaskets/{gasket_id}/circles").json()["count"]
+
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/deepen",
+            json={"word": "0", "min_radius": 0.001},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["count"] > 0
+        assert data["added"] > 0
+        assert data["truncated"] is False
+        for circle in data["circles"]:
+            assert circle["word"].startswith("0")
+            r_num, r_denom = (int(p) for p in circle["radius"].split("/"))
+            assert abs(r_num / r_denom) >= 0.001
+
+        after = client.get(f"/api/gaskets/{gasket_id}/circles").json()["count"]
+        assert after == before + data["added"]
+
+    def test_deepen_is_idempotent_on_cache(self, client, gasket_id):
+        first = client.post(
+            f"/api/gaskets/{gasket_id}/deepen",
+            json={"word": "1", "min_radius": 0.005},
+        ).json()
+        second = client.post(
+            f"/api/gaskets/{gasket_id}/deepen",
+            json={"word": "1", "min_radius": 0.005},
+        ).json()
+        assert first["added"] > 0
+        assert second["added"] == 0  # everything already cached
+        assert second["count"] == first["count"]
+
+    def test_deepen_seed_word_walks_from_root(self, client, gasket_id):
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/deepen",
+            json={"word": "S0", "min_radius": 0.05},
+        )
+        assert response.status_code == 200
+        assert response.json()["count"] > 0
+
+    def test_deepen_invalid_word_rejected(self, client, gasket_id):
+        # Non-reduced word passes the schema regex but fails replay
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/deepen",
+            json={"word": "00", "min_radius": 0.01},
+        )
+        assert response.status_code == 400
+        # Bad characters fail schema validation
+        response = client.post(
+            f"/api/gaskets/{gasket_id}/deepen",
+            json={"word": "ab", "min_radius": 0.01},
+        )
+        assert response.status_code == 422
+
+    def test_deepen_missing_gasket_404(self, client):
+        response = client.post(
+            "/api/gaskets/99999/deepen", json={"word": "0", "min_radius": 0.01}
+        )
+        assert response.status_code == 404
+
 
 class TestAnalytics:
     def test_analytics_shape_and_values(self, client, gasket_id):

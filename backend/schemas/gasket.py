@@ -35,8 +35,11 @@ class GasketCreate(BaseModel):
     max_depth: int = Field(
         default=5,
         ge=1,
-        le=15,
-        description="Maximum recursion depth (1-15)",
+        le=64,
+        description=(
+            "Maximum recursion depth (1-64). Deep values are practical only "
+            "together with min_radius, which prunes subtrees by resolution."
+        ),
     )
     min_radius: Optional[float] = Field(
         default=None,
@@ -44,6 +47,13 @@ class GasketCreate(BaseModel):
         description=(
             "Resolution bound (model units): circles smaller than this are "
             "pruned along with their entire subtree. None = no pruning."
+        ),
+    )
+    include_circles: bool = Field(
+        default=True,
+        description=(
+            "When false, the response omits the circle list (use the "
+            "viewport endpoint GET /api/gaskets/{id}/circles instead)."
         ),
     )
 

@@ -73,7 +73,9 @@ class Gasket(Base):
         "Circle",
         back_populates="gasket",
         cascade="all, delete-orphan",
-        lazy="selectin",  # Load circles with gasket by default
+        # Lazy-load on access: responses with include_circles=False (the
+        # deepening flow) must not pull the whole packing from SQLite.
+        lazy="select",
     )
 
     def __repr__(self) -> str:

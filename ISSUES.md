@@ -311,3 +311,30 @@ Rationale:
 - Phase 6 implementation: Removed `.limit_denominator()`, introduced SymPy preservation
 - Test evidence: `backend/test_phase6_depth1.py` (depth 1 works, depth 3+ times out)
 - Related commit: Phase 6 gasket_generator.py refactoring
+
+---
+
+### Issue #6: Cusp Zoom Requires Parabolic Acceleration
+
+**Status:** Open (by design for M3 Stage A; fix scheduled with Milestone 5)
+**Priority:** Medium (Research feature completeness)
+
+**Description**
+
+Viewport deepening resumes the generation walk at a circle's group word, which
+is output-sensitive at GENERIC points of the residual set (bends grow
+exponentially along random reduced words, so word length ~ log(1/ε)). At
+TANGENCY points (cusps), however, the converging circle chains have bends
+growing only quadratically (e.g. the chain 3, 15, 35, 63, … = 4n²−1 at the
+origin cusp of the classic gasket): reaching viewport size ε at a cusp needs
+word length ~ 1/√ε — beyond any practical depth bound. Zooming exactly onto a
+cusp therefore stops resolving new circles once the depth budget (word length
+≤ 128) is exhausted, showing only the two big tangent circles.
+
+**Fix (Milestone 5)**: cusps are parabolic fixed points of the Apollonian
+group. The chain circles are orbits of a single parabolic Möbius
+transformation P fixing the tangency point; applying P^n directly (an O(3,1)
+matrix power on inversive coordinates, computable in closed form) reaches
+chain element n in O(1) instead of O(n) tree steps. Add cusp detection
+(viewport centered between two near-tangent large circles) and a
+parabolic-orbit generator alongside the word-replay deepen endpoint.

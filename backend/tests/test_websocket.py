@@ -131,7 +131,7 @@ class TestWebSocketGasketGenerate:
     def test_websocket_max_depth_too_large(self):
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
             websocket.send_json(
-                {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 50}
+                {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 100}
             )
             msg = websocket.receive_json()
             assert msg["type"] == "error"

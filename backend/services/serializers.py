@@ -23,8 +23,10 @@ from core.engine.walk import GeneratedCircle
 from db.models.circle import Circle
 from schemas import CircleResponse
 
-#: Denominator bound for lossy float -> fraction conversion.
-MAX_DENOMINATOR = 10**9
+#: Denominator bound for lossy float -> fraction conversion. 10^15 captures
+#: the full precision of the float64 mirrors, which the frontend's exact
+#: (BigInt rational) camera needs for deep zoom.
+MAX_DENOMINATOR = 10**15
 
 
 def db_word(record: GeneratedCircle) -> str:
