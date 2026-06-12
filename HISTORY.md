@@ -1423,10 +1423,25 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 21:30] Revamp Milestone 6: Hardening & Release
+**What was done**: Closed out the roadmap — CI perf gates, API-level e2e smoke in CI, SQLite export, documentation realignment, and an analytics estimator robustness fix found by the e2e run.
+**Specifics**:
+- `backend/benchmark.py`: CI performance gate (integral depth-10 walk ≥ 50k circles/s — measured ~206k/s; irrational budgeted walk ≥ 1k/s) — fails the build on >2x regression
+- `scripts/e2e_smoke.py` + CI `e2e` job: boots the real backend and drives the full research flow over the wire (WS generation classic+strip with line streaming, cache hit, word-replay deepen, parabolic cusp chain, Möbius transform, analytics, all three export formats)
+- SQLite export format (`?format=sqlite`): self-contained research DB with circles + metadata tables (engine version, budgets); tested
+- **Analytics fix (found by e2e)**: the δ-fit window now uses the resolution bound 1/min_radius_cached when available — resolution pruning *guarantees* enumeration completeness below that bend, so local cusp/deepen refinements (which over-densify the tail with N(T)~√T chain data) no longer skew the fit; generation heuristic retained for unpruned caches
+- WS persistence failures now log tracebacks instead of failing silently behind gasket_id=null
+- Documentation: CLAUDE.md's mathematically wrong worked example corrected ((-1,2,3)→(6,2); the old text claimed (-1,2,2)→(6,14/15) — the true value is the double root (3,3)); README rewritten for the current architecture; .DESIGN_SPEC.md and API_USAGE_GUIDE.md marked as historical with pointers to the authoritative docs
+**Deliberately deferred (recorded, not forgotten)**: browser-level Playwright e2e (needs browser binaries in CI; the API-level smoke covers the protocol surface), black --check (codebase not yet black-formatted; ruff enforces correctness rules), Hypothesis property tests (seeded-random equivalents exist in tests/engine/), openapi-typescript client generation, gmpy2/worker-process/coefficient-basis engine options.
+**Verification**: backend 369 tests + ruff + mypy --strict + perf gate; frontend 61 tests + eslint + tsc + build; `scripts/e2e_smoke.py` ALL CHECKS PASSED against a live server.
+**Status**: ✅ Complete — **all roadmap milestones M0–M6 delivered.**
+
+---
+
 ## Statistics
 
-**Total Entries**: 31
-**Completed**: 31
+**Total Entries**: 32
+**Completed**: 32
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 21:00
+**Last Updated**: 2026-06-12 21:30

@@ -3,7 +3,7 @@ Research data export endpoints.
 
 Reference: REVAMP_BLUEPRINT.md Phase 2.4 / Milestone 2.
 
-GET /api/gaskets/{id}/export?format=csv|json streams the full circle table
+GET /api/gaskets/{id}/export?format=csv|json|sqlite streams the full circle table
 (exact strings + float mirrors + number-theoretic tags) for analysis in
 Pandas, Mathematica, etc. Responses are streamed row-by-row so large packings
 do not buffer in memory.
@@ -12,12 +12,15 @@ do not buffer in memory.
 import csv
 import io
 import json
+import sqlite3
+import tempfile
 from fractions import Fraction
 from typing import Iterator, Optional
 
 import sympy as sp
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 
 from api.deps import get_db
@@ -109,7 +112,7 @@ def _iter_json(gasket: Gasket, circles) -> Iterator[str]:
 @router.get("/gaskets/{gasket_id}/export")
 def export_gasket(
     gasket_id: int,
-    format: str = Query(default="csv", pattern="^(csv|json)$"),
+    format: str = Query(default="csv", pattern="^(csv|json|sqlite)$"),
     db: Session = Depends(get_db),
 ):
     """Stream the circle table of a cached gasket as CSV or JSON."""
@@ -126,6 +129,51 @@ def export_gasket(
         .order_by(Circle.generation, Circle.id)
         .yield_per(1000)
     )
+
+    if format == "sqlite":
+        # Build a self-contained research database (one table, same columns
+        # as the CSV) in a temp file; cleaned up after the response streams.
+        import os
+
+        handle, path = tempfile.mkstemp(suffix=".sqlite")
+        os.close(handle)
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(
+                """CREATE TABLE circles (
+                    id INTEGER, generation INTEGER, word TEXT, is_line INTEGER,
+                    curvature_exact TEXT, cocurvature_exact TEXT,
+                    kx_exact TEXT, ky_exact TEXT,
+                    curvature_float REAL, x_float REAL, y_float REAL,
+                    radius_float REAL, residue_24 INTEGER, is_prime_bend INTEGER
+                )"""
+            )
+            conn.execute(
+                "CREATE TABLE metadata (key TEXT, value TEXT)"
+            )
+            conn.executemany(
+                "INSERT INTO metadata VALUES (?, ?)",
+                [
+                    ("gasket_id", str(gasket.id)),
+                    ("initial_curvatures", gasket.initial_curvatures),
+                    ("engine_version", ENGINE_VERSION),
+                    ("max_depth_cached", str(gasket.max_depth_cached)),
+                    ("min_radius_cached", str(gasket.min_radius_cached)),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO circles VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (tuple(_row_values(c)[col] for col in COLUMNS) for c in circles),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return FileResponse(
+            path,
+            media_type="application/vnd.sqlite3",
+            filename=f"gasket_{gasket_id}.sqlite",
+            background=BackgroundTask(os.unlink, path),
+        )
 
     if format == "csv":
         return StreamingResponse(

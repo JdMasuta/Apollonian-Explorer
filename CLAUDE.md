@@ -132,7 +132,7 @@ User: "Yes"
 Claude: [Implements descartes_curvature() function]
 
 Claude: "Function implemented. Now I'll write unit tests for:
-- Known configuration (-1, 2, 2, 3) → (6, 14/15)
+- Known configuration (-1, 2, 3) → completions (6, 2)
 - Edge case: three identical curvatures
 - Zero curvature handling
 
@@ -326,17 +326,20 @@ class TestDescartesCircleTheorem:
     def test_known_configuration(self):
         """Test with known Apollonian gasket configuration.
 
-        Starting curvatures: -1, 2, 2, 3
-        Expected results: 6 and 14/15
+        From the standard (-1, 2, 2, 3) gasket: given (-1, 2, 3) the
+        discriminant is (-1)(2) + (2)(3) + (3)(-1) = 1, so
+        k4 = 4 ± 2 = {6, 2}. (Note: (-1, 2, 2) has discriminant 0 and
+        yields the DOUBLE root 3 — a historical version of this example
+        wrongly claimed (6, 14/15).)
         """
         k1 = Fraction(-1)
         k2 = Fraction(2)
-        k3 = Fraction(2)
+        k3 = Fraction(3)
 
         k4_plus, k4_minus = descartes_curvature(k1, k2, k3)
 
         assert k4_plus == Fraction(6)
-        assert k4_minus == Fraction(14, 15)
+        assert k4_minus == Fraction(2)
 
     def test_identical_curvatures(self):
         """Test with three identical curvatures (1, 1, 1)."""

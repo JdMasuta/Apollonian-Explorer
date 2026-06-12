@@ -383,3 +383,21 @@ class TestStripPacking:
             "/api/gaskets", json={"curvatures": ["0", "1", "1"], "max_depth": 2}
         )
         assert response.status_code == 422
+
+
+class TestSqliteExport:
+    def test_sqlite_export(self, client, gasket_id):
+        import sqlite3
+        import tempfile
+
+        response = client.get(f"/api/gaskets/{gasket_id}/export?format=sqlite")
+        assert response.status_code == 200
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as f:
+            f.write(response.content)
+            f.flush()
+            conn = sqlite3.connect(f.name)
+            count = conn.execute("SELECT COUNT(*) FROM circles").fetchone()[0]
+            meta = dict(conn.execute("SELECT key, value FROM metadata"))
+            conn.close()
+        assert count == 164
+        assert meta["engine_version"]

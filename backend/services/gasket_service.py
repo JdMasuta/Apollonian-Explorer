@@ -141,6 +141,14 @@ def persist_walk_records(
         session.commit()
         return gasket_id
     except Exception:
+        # Best-effort: streaming already succeeded. But never silently —
+        # a persistence bug otherwise hides behind gasket_id = null.
+        import logging
+        import traceback
+
+        logging.getLogger("apollonian.persist").error(
+            "WS persistence failed:\n%s", traceback.format_exc()
+        )
         session.rollback()
         return None
     finally:

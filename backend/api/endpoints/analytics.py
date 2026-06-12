@@ -105,13 +105,18 @@ def get_analytics(
             index += 1
         counting.append({"T": t, "N": index})
 
-    # Exponent fit window: the cache is depth-truncated, so N(T) saturates
-    # artificially at large T. Enumeration is COMPLETE for T below the
-    # minimum bend of the deepest generation (every smaller bend appears at
-    # an earlier generation), so fit only on that range.
-    t_complete = min(
-        (row[0] for row in rows if row[1] == max_generation), default=high
-    )
+    # Exponent fit window: the cache is truncated, so N(T) saturates (or,
+    # after local cusp/deepen refinements, over-densifies) at large T. The
+    # enumeration is provably COMPLETE for bends below 1/min_radius_cached
+    # (resolution pruning keeps every circle above that radius), so prefer
+    # that bound; fall back to the depth heuristic (min bend of the deepest
+    # generation) for unpruned caches.
+    if gasket.min_radius_cached:
+        t_complete = 1.0 / gasket.min_radius_cached
+    else:
+        t_complete = min(
+            (row[0] for row in rows if row[1] == max_generation), default=high
+        )
     fit_ts = [t for t in t_values if low < t <= t_complete]
     estimate = _fit_exponent(bends, fit_ts or t_values)
 
