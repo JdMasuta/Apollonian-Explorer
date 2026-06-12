@@ -1341,10 +1341,32 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 04:30] Revamp Milestone 2 (complete): Resolution-Driven Generation, Schema v2, Research Endpoints + Frontend Streaming Fixes
+**What was done**: Diagnosed the five browser-screenshot failures (load-time WS noise, one-generation-per-page, mislabeled "Failed to parse" errors, React "Maximum update depth exceeded", depth-10 pegging a core for tens of minutes) and completed Milestone 2 proper per the approved plan.
+**Specifics — backend**:
+- `core/engine/walk.py`: incremental float mirrors (same ℤ-linear reflection in doubles; zero SymPy evalf per circle — ERR-014) and `WalkBudget.min_radius` resolution pruning (float pruning runs BEFORE the exact reflection, so cut subtrees cost nothing)
+- WebSocket endpoint: generation in a worker thread → asyncio queue (event loop responsive, /health 26ms mid-stream; disconnect cancels via threading.Event); batch 10→500; 10ms/batch sleep removed; additive `min_radius` protocol parameter
+- Schema v2 (`db/models/circle.py`, migration 002): group word (UNIQUE per gasket = identity), exact inversive coordinate strings, indexed float mirrors; `gaskets.min_radius_cached`; service persists directly from walk records with resolution-aware cache coverage
+- New endpoints: `GET /api/gaskets/{id}/circles` (viewport bbox/resolution query on indexed mirrors), `/analytics` (bend histogram, N(T), growth-exponent fit on the depth-complete range vs δ=1.305688; measured 1.03→1.11→1.18 at depths 4/6/8), `/export?format=csv|json` (streaming, with residues mod 24 + prime-bend tags)
+- Serializer bug found by live testing: exactness now chosen PER COMPONENT — (1,1,1) has rational bends with irrational centers and crashed `Fraction(sympy_expr)`; covered by new contract + serializer tests
+- Legacy retirement: `gasket_generator.py`, `diophantine_generator.py`, `engine_adapter.py` and their tests deleted; CI runs the full suite (335 tests, ~12s)
+**Specifics — frontend**:
+- Lazy connection: no connect-on-mount (kills StrictMode console noise, ERR-011); `generateGasket()` auto-connects per run, so the second Generate works (the backend closes the socket after each completion)
+- `handleMessage` separates JSON parsing from callback dispatch — callback exceptions are no longer misreported as parse failures (ERR-013)
+- rAF-throttled ingestion: progress circles buffer in refs and flush to the store once per frame; `maxGeneration` via useMemo; auto-fit keyed on circle count; Stage `onDragEnd` (clears Konva warning)
+- `min_radius` derived from seed extent / canvas size and sent with every generate; favicon added (404 noise)
+**Verified live (backend :8000 + Vite :5173, through the proxy)**: (1,1,1) depth 3 = 56 circles in 0.2s; second generate works; (1,1,1) depth 10 = 6,632 circles in 4.8s (was: minutes of pegged CPU then a frontend crash); classic depth 12 at min_radius 0.0005 = 7,496 circles in 0.2s; analytics/viewport/export endpoints checked.
+**Files changed**: see commits f326199 (backend) and the frontend/docs commit following it.
+**Tests**: backend 335 passing (~12s) incl. new test_api_research.py, test_serializers.py, irrational + min_radius contract tests; frontend 23 passing incl. lazy-connect, reconnect-after-server-close, and error-attribution regressions.
+**Status**: ✅ Complete
+**Notes**: Unpruned irrational deep walks remain SymPy-bound (~1.4ms/circle for exact reflections); the integer-coefficient-over-seed-basis representation (REVAMP_BLUEPRINT.md Phase 2.0) is the future fix if unpruned deep irrational enumeration becomes a research need. Frontend rendering still uses per-node Konva, now safe because streams are resolution-bounded; the WebGL renderer remains Milestone 3.
+
+---
+
 ## Statistics
 
-**Total Entries**: 26
-**Completed**: 26
+**Total Entries**: 27
+**Completed**: 27
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 22:55
+**Last Updated**: 2026-06-12 04:30

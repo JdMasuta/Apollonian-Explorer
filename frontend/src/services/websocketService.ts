@@ -178,19 +178,37 @@ class WebSocketService {
   /**
    * Generate an Apollonian gasket with real-time streaming.
    *
+   * Connects on demand: the backend closes the socket after each completed
+   * run (one generation per connection), so this method always ensures a
+   * live connection first (connect() is idempotent).
+   *
    * @param curvatures - Initial curvatures (3 or 4 values as strings)
    * @param maxDepth - Maximum recursion depth (1-15)
    * @param callbacks - Callback functions for progress, complete, and error
+   * @param options - Optional generation parameters:
+   *   minRadius — resolution bound in model units; circles smaller than
+   *   this are pruned server-side along with their subtrees.
    */
-  generateGasket(
+  async generateGasket(
     curvatures: string[],
     maxDepth: number,
-    callbacks: WebSocketCallbacks
-  ): void {
+    callbacks: WebSocketCallbacks,
+    options: { minRadius?: number } = {}
+  ): Promise<void> {
+    try {
+      await this.connect();
+    } catch (error) {
+      callbacks.onError({
+        type: 'error',
+        message: `Could not connect to the server: ${error instanceof Error ? error.message : error}`,
+      });
+      return;
+    }
+
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       callbacks.onError({
         type: 'error',
-        message: 'WebSocket is not connected. Call connect() first.',
+        message: 'WebSocket is not connected.',
       });
       return;
     }
@@ -199,11 +217,14 @@ class WebSocketService {
     this.callbacks = callbacks;
 
     // Send start message
-    const message = {
+    const message: Record<string, unknown> = {
       action: 'start',
       curvatures,
       max_depth: maxDepth,
     };
+    if (options.minRadius !== undefined) {
+      message.min_radius = options.minRadius;
+    }
 
     try {
       this.ws.send(JSON.stringify(message));
@@ -236,19 +257,31 @@ class WebSocketService {
   /**
    * Handle incoming WebSocket message.
    *
+   * JSON parsing and callback dispatch have separate error handling so an
+   * exception thrown by application code is never misreported as a protocol
+   * parse failure (DEBUG_LOG ERR-013).
+   *
    * @param event - WebSocket message event
    */
   private handleMessage(event: MessageEvent): void {
+    let data: WebSocketMessage;
     try {
-      const data: WebSocketMessage = JSON.parse(event.data);
+      data = JSON.parse(event.data);
+    } catch (error) {
+      console.error('[WebSocket] Failed to parse message:', error);
+      this.callbacks?.onError({
+        type: 'error',
+        message: `Failed to parse message: ${error}`,
+      });
+      return;
+    }
 
-      console.log('[WebSocket] Received message:', data.type);
+    if (!this.callbacks) {
+      console.warn('[WebSocket] Received message but no callbacks registered');
+      return;
+    }
 
-      if (!this.callbacks) {
-        console.warn('[WebSocket] Received message but no callbacks registered');
-        return;
-      }
-
+    try {
       // Route message to appropriate callback
       switch (data.type) {
         case 'progress':
@@ -270,13 +303,13 @@ class WebSocketService {
           );
       }
     } catch (error) {
-      console.error('[WebSocket] Failed to parse message:', error);
-      if (this.callbacks) {
-        this.callbacks.onError({
-          type: 'error',
-          message: `Failed to parse message: ${error}`,
-        });
-      }
+      // An error thrown by a callback is an application bug; report it as
+      // such (and to the console with its real stack).
+      console.error('[WebSocket] Message handler threw:', error);
+      this.callbacks?.onError({
+        type: 'error',
+        message: `Error handling '${data.type}' message: ${error instanceof Error ? error.message : error}`,
+      });
     }
   }
 

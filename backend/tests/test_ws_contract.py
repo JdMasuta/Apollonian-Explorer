@@ -138,6 +138,46 @@ class TestProtocolContractQuadruple:
         assert messages[-1]["total_circles"] == 8  # 4 seed + 4 reflections
 
 
+class TestProtocolContractIrrational:
+    """Irrational seeds (rational bends, irrational centers) keep the contract.
+
+    Regression: per-component exactness in record_to_api_circle — (1,1,1)
+    previously crashed serialization with 'argument should be a string or a
+    Rational instance'.
+    """
+
+    def test_irrational_seed_run(self):
+        messages = collect_messages(["1", "1", "1"], max_depth=2)
+        assert messages[-1]["type"] == "complete"
+        assert messages[-1]["total_circles"] == 20
+        for message in messages:
+            if message["type"] == "progress":
+                for circle in message["circles"]:
+                    assert_circle_shape(circle)
+
+    def test_min_radius_bounds_the_stream(self):
+        """The additive min_radius parameter prunes the stream server-side."""
+        full = collect_messages(["-1", "2", "2"], max_depth=5)
+        pruned_messages = []
+        client = TestClient(app)
+        with client.websocket_connect("/ws/gasket/generate") as websocket:
+            websocket.send_json(
+                {
+                    "action": "start",
+                    "curvatures": ["-1", "2", "2"],
+                    "max_depth": 5,
+                    "min_radius": 0.05,
+                }
+            )
+            while True:
+                message = websocket.receive_json()
+                pruned_messages.append(message)
+                if message["type"] in ("complete", "error"):
+                    break
+        assert pruned_messages[-1]["type"] == "complete"
+        assert 0 < pruned_messages[-1]["total_circles"] < full[-1]["total_circles"]
+
+
 class TestProtocolErrors:
     """Error messages keep the ErrorMessage shape the frontend routes on."""
 

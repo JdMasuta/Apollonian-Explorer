@@ -191,17 +191,15 @@ Post-MVP: **Option 1** (refactor MockWebSocket) - Quick fix with high impact
 
 ### Issue #5: SymPy Arithmetic Performance Bottleneck in Deep Gasket Generation
 
-**Status:** Superseded by `core/engine` (Revamp Milestone 1, 2026-06-11) —
-the inversive-coordinate engine generates with linear integer/rational
-arithmetic only (no square roots, no SymPy in the hot loop): depth-10
-classic gasket (118,100 circles) in ~0.5s. Irrational seeds keep SymPy
-scalars but only through linear combinations (no `simplify` per step).
-The legacy generator (`core/gasket_generator.py`) is retained as a test
-oracle until Milestone 2 switches the service layer over; this issue
-remains open only for that legacy path. Issues #2 (float-approximate
-placement) and #3 (incomplete deduplication) are likewise resolved
-structurally in the engine: seeds are verified by exact algebraic
-identities, and the reduced-word walk cannot produce duplicates.
+**Status:** ✅ Closed (2026-06-12, Revamp Milestone 2) — the
+inversive-coordinate engine generates with linear arithmetic only, carries
+incremental float mirrors (no SymPy evalf per circle, ERR-014), and prunes
+by resolution (`min_radius`), making deep generation output-sensitive:
+(1,1,1) at depth 10 serves ~6.6k circles in ~5s end-to-end (was tens of
+minutes, ERR-014). The legacy generator and its test oracle have been
+deleted; Issues #2 (float-approximate placement) and #3 (incomplete
+deduplication) are resolved structurally in the engine (exact algebraic
+seed verification; the reduced-word walk cannot produce duplicates).
 **Priority:** Medium (Impacts deep gasket generation with irrational configurations)
 **Discovered:** Phase 6 testing (2025-11-13)
 

@@ -48,23 +48,33 @@ def _exact_or_float(value: Exact, mirror: float) -> Fraction:
 def record_to_api_circle(
     record: GeneratedCircle, circle_id: Optional[int] = None
 ) -> Dict[str, object]:
-    """Serialize a walk record to the API circle shape (lines unsupported)."""
+    """Serialize a walk record to the API circle shape (lines unsupported).
+
+    Exactness is decided per component: e.g. the (1,1,1) packing has rational
+    bends but irrational centers, so curvature/radius serialize exactly while
+    the center falls back to the float mirrors.
+    """
     circle = record.circle
     if circle.is_line:
         raise ValueError("Lines cannot be serialized to the circle API shape")
 
     b = circle.curvature
-    if isinstance(b, (int, Fraction)):
+    b_rational = isinstance(b, (int, Fraction))
+    if b_rational:
         b_frac = Fraction(b)
-        x, y = circle.center()
-        x_frac = Fraction(x)
-        y_frac = Fraction(y)
         r_frac = 1 / b_frac  # signed, matching the legacy contract
     else:
         b_frac = Fraction(record.curvature_f).limit_denominator(MAX_DENOMINATOR)
-        x_frac = Fraction(record.x_f or 0.0).limit_denominator(MAX_DENOMINATOR)
-        y_frac = Fraction(record.y_f or 0.0).limit_denominator(MAX_DENOMINATOR)
         r_frac = 1 / b_frac if b_frac != 0 else Fraction(0)
+
+    if b_rational and isinstance(circle.kx, (int, Fraction)):
+        x_frac = Fraction(circle.kx) / b_frac
+    else:
+        x_frac = Fraction(record.x_f or 0.0).limit_denominator(MAX_DENOMINATOR)
+    if b_rational and isinstance(circle.ky, (int, Fraction)):
+        y_frac = Fraction(circle.ky) / b_frac
+    else:
+        y_frac = Fraction(record.y_f or 0.0).limit_denominator(MAX_DENOMINATOR)
 
     return {
         "id": circle_id,
@@ -110,20 +120,26 @@ def row_to_response(row: Circle) -> CircleResponse:
     if row.is_line:
         raise ValueError("Lines cannot be serialized to the circle API shape")
 
+    # Exactness per component (e.g. (1,1,1): rational bends, irrational centers)
     b_rational = _parse_rational(row.curvature_exact)
     kx_rational = _parse_rational(row.kx_exact)
     ky_rational = _parse_rational(row.ky_exact)
 
-    if b_rational is not None and b_rational != 0 and kx_rational is not None and ky_rational is not None:
+    if b_rational is not None and b_rational != 0:
         b_frac = b_rational
-        x_frac = kx_rational / b_rational
-        y_frac = ky_rational / b_rational
         r_frac = 1 / b_rational
     else:
         b_frac = Fraction(row.b_f).limit_denominator(MAX_DENOMINATOR)
-        x_frac = Fraction(row.x_f or 0.0).limit_denominator(MAX_DENOMINATOR)
-        y_frac = Fraction(row.y_f or 0.0).limit_denominator(MAX_DENOMINATOR)
         r_frac = 1 / b_frac if b_frac != 0 else Fraction(0)
+
+    if b_rational is not None and b_rational != 0 and kx_rational is not None:
+        x_frac = kx_rational / b_rational
+    else:
+        x_frac = Fraction(row.x_f or 0.0).limit_denominator(MAX_DENOMINATOR)
+    if b_rational is not None and b_rational != 0 and ky_rational is not None:
+        y_frac = ky_rational / b_rational
+    else:
+        y_frac = Fraction(row.y_f or 0.0).limit_denominator(MAX_DENOMINATOR)
 
     return CircleResponse(
         id=row.id,

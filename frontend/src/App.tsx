@@ -4,7 +4,7 @@
  * Integrates canvas, WebSocket streaming, and state management.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Container,
   Typography,
@@ -19,12 +19,27 @@ import {
 } from '@mui/material';
 import { CanvasContainer } from './components/GasketCanvas';
 import { useGasketStore } from './stores/gasketStore';
-import websocketService from './services/websocketService';
+import websocketService, {
+  type CircleData,
+} from './services/websocketService';
+import { parseValue } from './components/GasketCanvas/utils';
+
+/**
+ * Resolution bound sent to the backend: circles smaller than roughly half a
+ * pixel at the initial fit are pruned server-side (subtree and all), keeping
+ * deep generations output-sensitive instead of exponential.
+ */
+function deriveMinRadius(curvatureStrings: string[], canvasPx = 900): number {
+  const radii = curvatureStrings
+    .map((c) => Math.abs(1 / parseValue(c)))
+    .filter((r) => Number.isFinite(r) && r > 0);
+  const extent = 2 * Math.max(...radii, 1);
+  return extent / (2 * canvasPx);
+}
 
 function App() {
   const [curvatures, setCurvatures] = useState('1, 1, 1');
   const [maxDepth, setMaxDepth] = useState(3);
-  const [isConnected, setIsConnected] = useState(false);
 
   // Gasket store state
   const circles = useGasketStore((state) => state.circles);
@@ -45,35 +60,46 @@ function App() {
   );
   const setProgress = useGasketStore((state) => state.setProgress);
 
-  // Connect to WebSocket on mount
+  // No eager connection: generateGasket() connects on demand (the backend
+  // serves one generation per connection). Connecting in a mount effect
+  // also produced StrictMode console noise (DEBUG_LOG ERR-011).
   useEffect(() => {
-    const connect = async () => {
-      try {
-        await websocketService.connect();
-        setIsConnected(true);
-        setError(null);
-      } catch {
-        setError('Failed to connect to server');
-        setIsConnected(false);
-      }
-    };
-
-    connect();
-
     return () => {
       websocketService.disconnect();
     };
   }, []);
 
+  // Incoming circles are buffered and flushed to the store at most once per
+  // animation frame. Per-message store updates flooded React with nested
+  // update cascades ("Maximum update depth exceeded", DEBUG_LOG ERR-013).
+  const pendingCirclesRef = useRef<CircleData[]>([]);
+  const pendingMetaRef = useRef<{ generation: number; progress: number } | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const flushPending = () => {
+    rafRef.current = null;
+    if (pendingCirclesRef.current.length > 0) {
+      const batch = pendingCirclesRef.current;
+      pendingCirclesRef.current = [];
+      addCircles(batch);
+    }
+    if (pendingMetaRef.current) {
+      setCurrentGeneration(pendingMetaRef.current.generation);
+      setProgress(pendingMetaRef.current.progress);
+      pendingMetaRef.current = null;
+    }
+  };
+
+  const scheduleFlush = () => {
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(flushPending);
+    }
+  };
+
   /**
    * Handle generate button click.
    */
   const handleGenerate = async () => {
-    if (!isConnected) {
-      setError('Not connected to server');
-      return;
-    }
-
     try {
       // Parse curvatures
       const curvatureArray = curvatures
@@ -87,45 +113,60 @@ function App() {
       }
 
       // Clear previous data
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      pendingCirclesRef.current = [];
+      pendingMetaRef.current = null;
       clearCircles();
       setError(null);
       setGenerating(true);
       setProgress(0);
 
-      // Start generation
-      websocketService.generateGasket(curvatureArray, maxDepth, {
-        onProgress: (data) => {
-          console.log('Progress:', data.generation, data.circles_count);
-          addCircles(data.circles);
-          setCurrentGeneration(data.generation);
+      // Start generation (connects on demand; resolution-bounded stream)
+      await websocketService.generateGasket(
+        curvatureArray,
+        maxDepth,
+        {
+          onProgress: (data) => {
+            pendingCirclesRef.current.push(...data.circles);
+            pendingMetaRef.current = {
+              generation: data.generation,
+              progress: Math.min(95, ((data.generation + 1) / (maxDepth + 1)) * 100),
+            };
+            scheduleFlush();
+          },
 
-          // Estimate progress (rough approximation)
-          const progressPercent = Math.min(
-            95,
-            ((data.generation + 1) / (maxDepth + 1)) * 100
-          );
-          setProgress(progressPercent);
-        },
+          onComplete: (data) => {
+            console.log('Complete:', data.total_circles);
+            if (rafRef.current !== null) {
+              cancelAnimationFrame(rafRef.current);
+            }
+            flushPending();
+            setGenerating(false);
+            setProgress(100);
+            setGasket({
+              id: data.gasket_id,
+              initial_curvatures: curvatureArray,
+              max_depth: maxDepth,
+              total_circles: data.total_circles,
+            });
+          },
 
-        onComplete: (data) => {
-          console.log('Complete:', data.total_circles);
-          setGenerating(false);
-          setProgress(100);
-          setGasket({
-            id: data.gasket_id,
-            initial_curvatures: curvatureArray,
-            max_depth: maxDepth,
-            total_circles: data.total_circles,
-          });
+          onError: (data) => {
+            console.error('Error:', data.message);
+            if (rafRef.current !== null) {
+              cancelAnimationFrame(rafRef.current);
+            }
+            flushPending();
+            setError(data.message);
+            setGenerating(false);
+            setProgress(0);
+          },
         },
-
-        onError: (data) => {
-          console.error('Error:', data.message);
-          setError(data.message);
-          setGenerating(false);
-          setProgress(0);
-        },
-      });
+        { minRadius: deriveMinRadius(curvatureArray) }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setGenerating(false);
@@ -173,7 +214,7 @@ function App() {
                 <Button
                   variant="contained"
                   onClick={handleGenerate}
-                  disabled={!isConnected || isGenerating}
+                  disabled={isGenerating}
                   fullWidth
                 >
                   {isGenerating ? 'Generating...' : 'Generate'}
@@ -186,10 +227,6 @@ function App() {
                       {Math.round(progress)}% - {circles.length} circles
                     </Typography>
                   </Box>
-                )}
-
-                {!isConnected && (
-                  <Alert severity="warning">Not connected to server</Alert>
                 )}
 
                 {error && <Alert severity="error">{error}</Alert>}

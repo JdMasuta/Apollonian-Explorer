@@ -193,7 +193,7 @@ describe('WebSocketService', () => {
   describe('generateGasket()', () => {
     it('sends the start request in the protocol format', async () => {
       await websocketService.connect();
-      websocketService.generateGasket(['-1', '2', '2'], 5, makeCallbacks());
+      await websocketService.generateGasket(['-1', '2', '2'], 5, makeCallbacks());
 
       expect(lastSocket().sentMessages).toHaveLength(1);
       expect(JSON.parse(lastSocket().sentMessages[0])).toEqual({
@@ -203,20 +203,62 @@ describe('WebSocketService', () => {
       });
     });
 
-    it('reports an error through onError when not connected', () => {
+    it('includes min_radius when provided', async () => {
+      await websocketService.generateGasket(['-1', '2', '2'], 8, makeCallbacks(), {
+        minRadius: 0.001,
+      });
+
+      expect(JSON.parse(lastSocket().sentMessages[0])).toEqual({
+        action: 'start',
+        curvatures: ['-1', '2', '2'],
+        max_depth: 8,
+        min_radius: 0.001,
+      });
+    });
+
+    it('connects on demand when not connected (lazy connection)', async () => {
+      expect(websocketService.isConnected()).toBe(false);
+
+      await websocketService.generateGasket(['1', '1', '1'], 3, makeCallbacks());
+
+      expect(websocketService.isConnected()).toBe(true);
+      expect(lastSocket().sentMessages).toHaveLength(1);
+    });
+
+    it('reconnects after the server closes the socket post-completion', async () => {
+      // First generation: backend closes the connection after 'complete'.
+      const first = makeCallbacks();
+      await websocketService.generateGasket(['-1', '2', '2'], 3, first);
+      lastSocket().simulateMessage({ type: 'complete', gasket_id: null, total_circles: 8 });
+      lastSocket().close(); // server-side close (code 1000 after complete)
+      expect(websocketService.isConnected()).toBe(false);
+
+      // Second generation in the same page must transparently reconnect
+      // (regression: 'WebSocket is not connected. Call connect() first.').
+      const second = makeCallbacks();
+      await websocketService.generateGasket(['-1', '2', '2'], 3, second);
+
+      expect(second.onError).not.toHaveBeenCalled();
+      expect(websocketService.isConnected()).toBe(true);
+      expect(sockets).toHaveLength(2);
+      expect(lastSocket().sentMessages).toHaveLength(1);
+    });
+
+    it('reports connection failures through onError', async () => {
+      MockWebSocket.failNext = true;
       const callbacks = makeCallbacks();
-      websocketService.generateGasket(['1', '1', '1'], 3, callbacks);
+
+      await websocketService.generateGasket(['1', '1', '1'], 3, callbacks);
 
       expect(callbacks.onError).toHaveBeenCalledTimes(1);
-      expect(callbacks.onError.mock.calls[0][0].message).toMatch(/not connected/i);
+      expect(callbacks.onError.mock.calls[0][0].message).toMatch(/connect/i);
     });
   });
 
   describe('message routing', () => {
     async function connectAndRegister() {
       const callbacks = makeCallbacks();
-      await websocketService.connect();
-      websocketService.generateGasket(['-1', '2', '2'], 2, callbacks);
+      await websocketService.generateGasket(['-1', '2', '2'], 2, callbacks);
       return callbacks;
     }
 
@@ -296,6 +338,29 @@ describe('WebSocketService', () => {
       expect(callbacks.onProgress).not.toHaveBeenCalled();
       expect(callbacks.onComplete).not.toHaveBeenCalled();
       expect(callbacks.onError).not.toHaveBeenCalled();
+    });
+
+    it('does not misreport callback exceptions as parse failures', async () => {
+      // Regression for ERR-013: a React error thrown inside onProgress was
+      // surfaced as "Failed to parse message: ...".
+      const callbacks = makeCallbacks();
+      callbacks.onProgress.mockImplementation(() => {
+        throw new Error('Maximum update depth exceeded');
+      });
+      await websocketService.generateGasket(['-1', '2', '2'], 2, callbacks);
+
+      lastSocket().simulateMessage({
+        type: 'progress',
+        generation: 1,
+        circles_count: 0,
+        circles: [],
+      });
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1);
+      const message = callbacks.onError.mock.calls[0][0].message;
+      expect(message).not.toMatch(/parse/i);
+      expect(message).toMatch(/handling 'progress' message/i);
+      expect(message).toMatch(/Maximum update depth exceeded/);
     });
   });
 

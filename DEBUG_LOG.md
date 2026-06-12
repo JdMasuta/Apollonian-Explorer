@@ -450,6 +450,77 @@ backend process actually started (curl /health).
 
 ---
 
+#### [ERR-013] 2026-06-12 - "Failed to parse message: Maximum update depth exceeded" under streaming load
+**Error Message**:
+```
+Error: Failed to parse message: Error: Maximum update depth exceeded.
+This can happen when a component repeatedly calls setState inside
+componentWillUpdate or componentDidUpdate. ...
+(stack: setState <- addCircles <- onProgress <- handleMessage <- onmessage)
+```
+**Context**: Generating a depth-10 gasket; thousands of 10-circle progress
+messages flooded the frontend.
+**Root Cause**: Two independent bugs:
+1. `websocketService.handleMessage` wrapped JSON.parse AND callback dispatch
+   in one try/catch, so the React exception thrown inside `onProgress` was
+   misreported as a protocol parse failure.
+2. Every progress message ran `addCircles` (full array re-clone, O(n²)) plus
+   two more store setStates, and every new circles array identity re-fired
+   two setState-in-effects in GasketCanvas (`setMaxGeneration`, autoFit →
+   `setTransform`). Under message flood, React 19 hit its nested-update
+   limit and threw.
+**Solution**:
+- Separate parse and dispatch error handling; callback exceptions report as
+  "Error handling '<type>' message" with the real stack on the console.
+- Buffer incoming circles in refs and flush to the store at most once per
+  animation frame (App.tsx); progress/generation state updates ride the
+  same flush.
+- `maxGeneration` computed with useMemo (no state), auto-fit keyed on the
+  circle COUNT, Stage onDragEnd added (also clears the Konva warning).
+- Server side: batch size 10 → 500 and the 10ms-per-batch sleep removed.
+**Prevention**: Never apply per-message store updates from a high-rate
+stream — coalesce on animation frames; never setState in an effect keyed on
+array identity that changes per message; keep parse and dispatch error
+handling separate so error sources stay attributable.
+**Related**: ERR-011, ERR-014
+**Files Changed**:
+- `frontend/src/services/websocketService.ts`, `frontend/src/App.tsx`,
+  `frontend/src/components/GasketCanvas/GasketCanvas.tsx`,
+  `backend/api/endpoints/websocket.py`
+
+---
+
+#### [ERR-014] 2026-06-12 - Depth-10 irrational generation pegged one CPU core for tens of minutes
+**Error Message**:
+```
+(no exception — POST/WS generation of (1,1,1) at depth 10 saturated one
+core "for a very long time"; profile showed float(sympy_expr) evalf calls
+~5x per circle x 118,100 circles)
+```
+**Context**: User generated (1,1,1) at depth 10 from the UI.
+**Root Cause**: Three compounding costs: (a) serialization called
+`float(expr)` (a SymPy evalf) per scalar per circle; (b) the WS endpoint
+slept 10ms per 10-circle batch (≥118s of pure sleep at depth 10); (c)
+generation ran synchronously on the event loop, blocking the backend.
+**Solution** (Milestone 2):
+- The walk now maintains incremental float mirrors (the reflection is the
+  same linear op in doubles) — zero evalf per circle.
+- `WalkBudget.min_radius` resolution pruning makes deep walks
+  output-sensitive; the frontend derives min_radius from the canvas size,
+  so depth 10 streams ~6.6k circles in ~5s instead of 118k in tens of
+  minutes.
+- Generation runs in a worker thread feeding an asyncio queue with
+  disconnect cancellation; /health answers in ~26ms mid-stream.
+**Prevention**: keep SymPy out of per-circle paths (mirrors at generation
+time); budget output by resolution, not depth alone; never run CPU-bound
+generation on the event loop.
+**Related**: ERR-009, ERR-013
+**Files Changed**:
+- `backend/core/engine/walk.py`, `backend/api/endpoints/websocket.py`,
+  `backend/services/serializers.py`, `frontend/src/App.tsx`
+
+---
+
 ### Performance Issues
 
 *No issues logged yet*

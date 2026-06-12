@@ -11,7 +11,14 @@
  * Reference: IMPLEMENTATION_PLAN.md Phase 3
  */
 
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from 'react';
 import { Stage, Layer, Circle as KonvaCircle } from 'react-konva';
 import type Konva from 'konva';
 import type { CircleData } from '../../services/websocketService';
@@ -88,22 +95,25 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
   });
 
   const stageRef = useRef<Konva.Stage | null>(null);
-  const [maxGeneration, setMaxGeneration] = useState(0);
 
-  // Calculate max generation for coloring
-  useEffect(() => {
-    if (circles.length > 0) {
-      const max = Math.max(...circles.map((c) => c.generation));
-      setMaxGeneration(max);
+  // Derived during render (a setState-in-effect here cascaded under
+  // streaming updates and tripped React's nested-update limit, ERR-013).
+  const maxGeneration = useMemo(() => {
+    let max = 0;
+    for (const c of circles) {
+      if (c.generation > max) max = c.generation;
     }
+    return max;
   }, [circles]);
 
-  // Auto-fit when circles change
+  // Auto-fit keyed on the circle COUNT (not array identity): at most one
+  // refit per store flush, none for unrelated re-renders.
   useEffect(() => {
     if (autoFit && circles.length > 0) {
       fitToCanvas();
     }
-  }, [circles, autoFit, width, height]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circles.length, autoFit, width, height]);
 
   /**
    * Fit gasket to canvas with padding.
@@ -184,6 +194,17 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
     }
   };
 
+  /**
+   * Sync pan position back into state after dragging the stage.
+   * (Without this, Konva warns about a draggable node with controlled
+   * position, and the next setTransform would snap the view back.)
+   */
+  const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (e.target === stageRef.current) {
+      setTransform((prev) => ({ ...prev, x: e.target.x(), y: e.target.y() }));
+    }
+  };
+
   return (
     <Stage
       ref={stageRef}
@@ -191,6 +212,7 @@ export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
       height={height}
       onWheel={handleWheel}
       onClick={handleStageClick}
+      onDragEnd={handleDragEnd}
       draggable
       scaleX={transform.scale}
       scaleY={transform.scale}
