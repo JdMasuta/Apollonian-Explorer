@@ -33,10 +33,12 @@ def health_check():
     Returns application status and database connectivity.
     """
     try:
+        from sqlalchemy import text
+
         from db import SessionLocal
         db = SessionLocal()
-        # Test DB connection
-        db.execute("SELECT 1")
+        # Test DB connection (SQLAlchemy 2.0 requires explicit text())
+        db.execute(text("SELECT 1"))
         db.close()
         db_status = "connected"
     except Exception as e:

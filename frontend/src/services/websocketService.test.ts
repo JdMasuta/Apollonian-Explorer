@@ -1,10 +1,21 @@
 /**
- * Tests for WebSocket service.
+ * Tests for the WebSocket service (frontend side of the gasket-generation
+ * protocol).
  *
- * Reference: IMPLEMENTATION_PLAN.md Phase 2 Day 5 Task 2
+ * Covers the full communication lifecycle against a mock socket:
+ * - URL derivation (same-origin, proxied by Vite in dev)
+ * - connect/disconnect lifecycle, including the React StrictMode
+ *   mount/unmount/mount cycle that previously wedged the service
+ *   (see ISSUES.md Issue #4 / DEBUG_LOG ERR-011)
+ * - request format and message routing (progress / complete / error)
+ *
+ * The backend side of the same protocol is covered by
+ * backend/tests/test_websocket.py, and the message schema contract by
+ * backend/tests/test_ws_contract.py (mirrors the TypeScript interfaces in
+ * websocketService.ts).
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import websocketService, {
   type ProgressMessage,
   type CompleteMessage,
@@ -12,7 +23,8 @@ import websocketService, {
 } from './websocketService';
 
 /**
- * Mock WebSocket class for testing.
+ * Mock WebSocket. Opens asynchronously on the macrotask queue, like a real
+ * socket; tests use real timers and `flush()` to advance.
  */
 class MockWebSocket {
   static CONNECTING = 0;
@@ -28,14 +40,24 @@ class MockWebSocket {
   onmessage: ((event: MessageEvent) => void) | null = null;
 
   sentMessages: string[] = [];
+  /** When true, the socket fires onerror instead of opening. */
+  static failNext = false;
 
   constructor(url: string) {
     this.url = url;
-    // Simulate async connection
+    const shouldFail = MockWebSocket.failNext;
+    MockWebSocket.failNext = false;
     setTimeout(() => {
-      this.readyState = MockWebSocket.OPEN;
-      if (this.onopen) {
-        this.onopen(new Event('open'));
+      if (this.readyState !== MockWebSocket.CONNECTING) {
+        return; // closed before the connection was established
+      }
+      if (shouldFail) {
+        this.readyState = MockWebSocket.CLOSED;
+        this.onerror?.(new Event('error'));
+        this.onclose?.(new CloseEvent('close', { code: 1006 }));
+      } else {
+        this.readyState = MockWebSocket.OPEN;
+        this.onopen?.(new Event('open'));
       }
     }, 0);
   }
@@ -48,350 +70,323 @@ class MockWebSocket {
   }
 
   close(): void {
+    const wasConnecting = this.readyState === MockWebSocket.CONNECTING;
     this.readyState = MockWebSocket.CLOSED;
-    if (this.onclose) {
-      this.onclose(new CloseEvent('close', { code: 1000, reason: 'Normal closure' }));
+    // Browsers fire error+close when closing a CONNECTING socket, and just
+    // close for an OPEN one.
+    if (wasConnecting) {
+      this.onerror?.(new Event('error'));
     }
+    this.onclose?.(new CloseEvent('close', { code: 1000, reason: 'Normal closure' }));
   }
 
-  // Helper method to simulate receiving a message
-  simulateMessage(data: any): void {
-    if (this.onmessage) {
-      const event = new MessageEvent('message', {
-        data: JSON.stringify(data),
-      });
-      this.onmessage(event);
-    }
+  simulateMessage(data: unknown): void {
+    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }));
   }
 
-  // Helper method to simulate connection error
-  simulateError(): void {
-    if (this.onerror) {
-      this.onerror(new Event('error'));
-    }
+  simulateRawMessage(data: string): void {
+    this.onmessage?.(new MessageEvent('message', { data }));
   }
 }
 
+let sockets: MockWebSocket[] = [];
+const lastSocket = () => sockets[sockets.length - 1];
+
+function makeCallbacks() {
+  return {
+    onProgress: vi.fn<(data: ProgressMessage) => void>(),
+    onComplete: vi.fn<(data: CompleteMessage) => void>(),
+    onError: vi.fn<(data: ErrorMessage) => void>(),
+  };
+}
+
+beforeEach(() => {
+  sockets = [];
+  MockWebSocket.failNext = false;
+  vi.stubGlobal(
+    'WebSocket',
+    class extends MockWebSocket {
+      constructor(url: string) {
+        super(url);
+        sockets.push(this);
+      }
+    }
+  );
+  websocketService.disconnect();
+});
+
 describe('WebSocketService', () => {
-  let mockWebSocket: MockWebSocket;
+  describe('URL derivation', () => {
+    it('connects same-origin so the Vite dev proxy (or the backend static host) serves it', async () => {
+      await websocketService.connect();
 
-  beforeEach(() => {
-    // Use fake timers to control async timing
-    vi.useFakeTimers();
-
-    // Mock global WebSocket
-    mockWebSocket = null as any;
-    // @ts-ignore - Mocking global WebSocket for tests
-    (global as any).WebSocket = function (this: any, url: string) {
-      mockWebSocket = new MockWebSocket(url) as any;
-      return mockWebSocket as any;
-    };
-
-    // Reset service state by disconnecting
-    websocketService.disconnect();
-  });
-
-  afterEach(() => {
-    // Flush any pending timers before cleanup
-    vi.runOnlyPendingTimers();
-    vi.restoreAllMocks();
-    // Restore real timers
-    vi.useRealTimers();
+      const expectedProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      expect(lastSocket().url).toBe(
+        `${expectedProtocol}//${window.location.host}/ws/gasket/generate`
+      );
+    });
   });
 
   describe('connect()', () => {
-    it('should connect to WebSocket server', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Advance timers to trigger onopen
-      await Promise.resolve(); // Flush microtasks
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
+    it('resolves when the socket opens', async () => {
+      await websocketService.connect();
 
-      expect(mockWebSocket).toBeTruthy();
-      expect(mockWebSocket.url).toBe('ws://localhost:8000/ws/gasket/generate');
+      expect(websocketService.isConnected()).toBe(true);
+      expect(websocketService.getReadyState()).toBe(MockWebSocket.OPEN);
+    });
+
+    it('resolves immediately if already connected, without a second socket', async () => {
+      await websocketService.connect();
+      await websocketService.connect();
+
+      expect(sockets).toHaveLength(1);
       expect(websocketService.isConnected()).toBe(true);
     });
 
-    it('should resolve immediately if already connected', async () => {
-      const connectPromise1 = websocketService.connect();
-      vi.advanceTimersByTime(0); // Advance timers for first connection
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise1;
-      const firstWebSocket = mockWebSocket;
+    it('shares an in-flight connection attempt between concurrent callers', async () => {
+      // Two synchronous connect() calls (e.g. two components mounting)
+      const first = websocketService.connect();
+      const second = websocketService.connect();
 
-      await websocketService.connect();
-      const secondWebSocket = mockWebSocket;
+      await Promise.all([first, second]);
 
-      // Should be the same WebSocket instance
-      expect(firstWebSocket).toBe(secondWebSocket);
+      expect(sockets).toHaveLength(1);
+      expect(websocketService.isConnected()).toBe(true);
     });
 
-    it('should reject if connection fails', async () => {
-      // Override mock to simulate connection failure
-      // @ts-ignore - Mocking global WebSocket for tests
-      (global as any).WebSocket = function (this: any, url: string) {
-        mockWebSocket = new MockWebSocket(url) as any;
-        setTimeout(() => {
-          mockWebSocket.simulateError();
-        }, 0);
-        return mockWebSocket as any;
-      };
+    it('rejects if the connection fails', async () => {
+      MockWebSocket.failNext = true;
 
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Advance timers to trigger error
-      await Promise.resolve(); // Flush microtasks
+      await expect(websocketService.connect()).rejects.toThrow(
+        'WebSocket connection failed'
+      );
+      expect(websocketService.isConnected()).toBe(false);
+    });
 
-      await expect(connectPromise).rejects.toThrow('WebSocket connection failed');
+    it('survives the React StrictMode mount/unmount/mount cycle', async () => {
+      // StrictMode (dev) runs: effect -> cleanup -> effect, i.e.
+      // connect(); disconnect(); connect() in quick succession. The first
+      // attempt is aborted while CONNECTING; the second must succeed.
+      // Regression test for ERR-011 (service wedged with
+      // 'Connection already in progress', page showed disconnected).
+      const first = websocketService.connect().catch(() => 'aborted');
+      websocketService.disconnect();
+      const second = websocketService.connect();
+
+      await second;
+      expect(await first).toBe('aborted');
+      expect(websocketService.isConnected()).toBe(true);
+      expect(sockets).toHaveLength(2);
+    });
+
+    it('can reconnect after a clean disconnect', async () => {
+      await websocketService.connect();
+      websocketService.disconnect();
+      expect(websocketService.isConnected()).toBe(false);
+
+      await websocketService.connect();
+      expect(websocketService.isConnected()).toBe(true);
+      expect(sockets).toHaveLength(2);
     });
   });
 
   describe('generateGasket()', () => {
-    it('should send generate request with correct format', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
+    it('sends the start request in the protocol format', async () => {
+      await websocketService.connect();
+      await websocketService.generateGasket(['-1', '2', '2'], 5, makeCallbacks());
 
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
-
-      websocketService.generateGasket(['1', '1', '1'], 5, callbacks);
-
-      expect(mockWebSocket.sentMessages).toHaveLength(1);
-      const message = JSON.parse(mockWebSocket.sentMessages[0]);
-      expect(message).toEqual({
+      expect(lastSocket().sentMessages).toHaveLength(1);
+      expect(JSON.parse(lastSocket().sentMessages[0])).toEqual({
         action: 'start',
-        curvatures: ['1', '1', '1'],
+        curvatures: ['-1', '2', '2'],
         max_depth: 5,
       });
     });
 
-    it('should call onError if not connected', async () => {
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
-
-      websocketService.generateGasket(['1', '1', '1'], 5, callbacks);
-
-      expect(callbacks.onError).toHaveBeenCalledWith({
-        type: 'error',
-        message: expect.stringContaining('not connected'),
+    it('includes min_radius when provided', async () => {
+      await websocketService.generateGasket(['-1', '2', '2'], 8, makeCallbacks(), {
+        minRadius: 0.001,
       });
+
+      expect(JSON.parse(lastSocket().sentMessages[0])).toEqual({
+        action: 'start',
+        curvatures: ['-1', '2', '2'],
+        max_depth: 8,
+        min_radius: 0.001,
+      });
+    });
+
+    it('connects on demand when not connected (lazy connection)', async () => {
+      expect(websocketService.isConnected()).toBe(false);
+
+      await websocketService.generateGasket(['1', '1', '1'], 3, makeCallbacks());
+
+      expect(websocketService.isConnected()).toBe(true);
+      expect(lastSocket().sentMessages).toHaveLength(1);
+    });
+
+    it('reconnects after the server closes the socket post-completion', async () => {
+      // First generation: backend closes the connection after 'complete'.
+      const first = makeCallbacks();
+      await websocketService.generateGasket(['-1', '2', '2'], 3, first);
+      lastSocket().simulateMessage({ type: 'complete', gasket_id: null, total_circles: 8 });
+      lastSocket().close(); // server-side close (code 1000 after complete)
+      expect(websocketService.isConnected()).toBe(false);
+
+      // Second generation in the same page must transparently reconnect
+      // (regression: 'WebSocket is not connected. Call connect() first.').
+      const second = makeCallbacks();
+      await websocketService.generateGasket(['-1', '2', '2'], 3, second);
+
+      expect(second.onError).not.toHaveBeenCalled();
+      expect(websocketService.isConnected()).toBe(true);
+      expect(sockets).toHaveLength(2);
+      expect(lastSocket().sentMessages).toHaveLength(1);
+    });
+
+    it('reports connection failures through onError', async () => {
+      MockWebSocket.failNext = true;
+      const callbacks = makeCallbacks();
+
+      await websocketService.generateGasket(['1', '1', '1'], 3, callbacks);
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1);
+      expect(callbacks.onError.mock.calls[0][0].message).toMatch(/connect/i);
     });
   });
 
-  describe('Message routing', () => {
-    it('should route progress messages to onProgress callback', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
+  describe('message routing', () => {
+    async function connectAndRegister() {
+      const callbacks = makeCallbacks();
+      await websocketService.generateGasket(['-1', '2', '2'], 2, callbacks);
+      return callbacks;
+    }
 
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
-
-      websocketService.generateGasket(['1', '1', '1'], 2, callbacks);
-
-      const progressMessage: ProgressMessage = {
+    it('routes progress messages to onProgress', async () => {
+      const callbacks = await connectAndRegister();
+      const progress: ProgressMessage = {
         type: 'progress',
-        generation: 0,
-        circles_count: 3,
+        generation: 1,
+        circles_count: 2,
         circles: [
           {
-            curvature: '1',
-            center: { x: '0', y: '0' },
-            radius: '1',
-            generation: 0,
+            curvature: '3/1',
+            center: { x: '0/1', y: '2/3' },
+            radius: '1/3',
+            generation: 1,
             parent_ids: [],
             tangent_ids: [],
           },
         ],
       };
 
-      mockWebSocket.simulateMessage(progressMessage);
+      lastSocket().simulateMessage(progress);
 
-      expect(callbacks.onProgress).toHaveBeenCalledWith(progressMessage);
-      expect(callbacks.onComplete).not.toHaveBeenCalled();
-      expect(callbacks.onError).not.toHaveBeenCalled();
-    });
-
-    it('should route complete messages to onComplete callback', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
-
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
-
-      websocketService.generateGasket(['1', '1', '1'], 2, callbacks);
-
-      const completeMessage: CompleteMessage = {
-        type: 'complete',
-        gasket_id: null,
-        total_circles: 14,
-      };
-
-      mockWebSocket.simulateMessage(completeMessage);
-
-      expect(callbacks.onComplete).toHaveBeenCalledWith(completeMessage);
-      expect(callbacks.onProgress).not.toHaveBeenCalled();
-      expect(callbacks.onError).not.toHaveBeenCalled();
-    });
-
-    it('should route error messages to onError callback', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
-
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
-
-      websocketService.generateGasket(['1', '1', '1'], 2, callbacks);
-
-      const errorMessage: ErrorMessage = {
-        type: 'error',
-        message: 'Invalid curvatures',
-      };
-
-      mockWebSocket.simulateMessage(errorMessage);
-
-      expect(callbacks.onError).toHaveBeenCalledWith(errorMessage);
-      expect(callbacks.onProgress).not.toHaveBeenCalled();
+      expect(callbacks.onProgress).toHaveBeenCalledTimes(1);
+      expect(callbacks.onProgress.mock.calls[0][0]).toEqual(progress);
       expect(callbacks.onComplete).not.toHaveBeenCalled();
     });
 
-    it('should handle multiple progress messages', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
+    it('routes complete messages to onComplete', async () => {
+      const callbacks = await connectAndRegister();
 
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
+      lastSocket().simulateMessage({ type: 'complete', gasket_id: null, total_circles: 20 });
 
-      websocketService.generateGasket(['1', '1', '1'], 3, callbacks);
+      expect(callbacks.onComplete).toHaveBeenCalledTimes(1);
+      expect(callbacks.onComplete.mock.calls[0][0].total_circles).toBe(20);
+    });
 
-      // Simulate multiple progress messages
-      for (let i = 0; i < 5; i++) {
-        mockWebSocket.simulateMessage({
+    it('routes error messages to onError', async () => {
+      const callbacks = await connectAndRegister();
+
+      lastSocket().simulateMessage({ type: 'error', message: 'boom' });
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1);
+      expect(callbacks.onError.mock.calls[0][0].message).toBe('boom');
+    });
+
+    it('handles multiple progress messages in order', async () => {
+      const callbacks = await connectAndRegister();
+
+      for (let generation = 1; generation <= 3; generation += 1) {
+        lastSocket().simulateMessage({
           type: 'progress',
-          generation: i,
-          circles_count: 2,
+          generation,
+          circles_count: 0,
           circles: [],
         });
       }
 
-      expect(callbacks.onProgress).toHaveBeenCalledTimes(5);
+      expect(callbacks.onProgress).toHaveBeenCalledTimes(3);
+      expect(callbacks.onProgress.mock.calls.map((c) => c[0].generation)).toEqual([1, 2, 3]);
+    });
+
+    it('reports malformed JSON through onError', async () => {
+      const callbacks = await connectAndRegister();
+
+      lastSocket().simulateRawMessage('invalid json {{{');
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1);
+      expect(callbacks.onError.mock.calls[0][0].message).toMatch(/parse/i);
+    });
+
+    it('ignores unknown message types without invoking callbacks', async () => {
+      const callbacks = await connectAndRegister();
+
+      lastSocket().simulateMessage({ type: 'mystery' });
+
+      expect(callbacks.onProgress).not.toHaveBeenCalled();
+      expect(callbacks.onComplete).not.toHaveBeenCalled();
+      expect(callbacks.onError).not.toHaveBeenCalled();
+    });
+
+    it('does not misreport callback exceptions as parse failures', async () => {
+      // Regression for ERR-013: a React error thrown inside onProgress was
+      // surfaced as "Failed to parse message: ...".
+      const callbacks = makeCallbacks();
+      callbacks.onProgress.mockImplementation(() => {
+        throw new Error('Maximum update depth exceeded');
+      });
+      await websocketService.generateGasket(['-1', '2', '2'], 2, callbacks);
+
+      lastSocket().simulateMessage({
+        type: 'progress',
+        generation: 1,
+        circles_count: 0,
+        circles: [],
+      });
+
+      expect(callbacks.onError).toHaveBeenCalledTimes(1);
+      const message = callbacks.onError.mock.calls[0][0].message;
+      expect(message).not.toMatch(/parse/i);
+      expect(message).toMatch(/handling 'progress' message/i);
+      expect(message).toMatch(/Maximum update depth exceeded/);
     });
   });
 
   describe('disconnect()', () => {
-    it('should close WebSocket connection', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
-
-      expect(websocketService.isConnected()).toBe(true);
-
+    it('closes the connection', async () => {
+      await websocketService.connect();
       websocketService.disconnect();
 
-      expect(mockWebSocket.readyState).toBe(MockWebSocket.CLOSED);
       expect(websocketService.isConnected()).toBe(false);
+      expect(websocketService.getReadyState()).toBeNull();
     });
 
-    it('should handle disconnect when not connected', () => {
-      // Should not throw
+    it('is a no-op when not connected', () => {
       expect(() => websocketService.disconnect()).not.toThrow();
-    });
-  });
-
-  describe('isConnected()', () => {
-    it('should return true when connected', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
-
-      expect(websocketService.isConnected()).toBe(true);
-    });
-
-    it('should return false when not connected', () => {
-      expect(websocketService.isConnected()).toBe(false);
-    });
-
-    it('should return false after disconnect', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
-
-      websocketService.disconnect();
       expect(websocketService.isConnected()).toBe(false);
     });
   });
 
   describe('getReadyState()', () => {
-    it('should return ready state when connected', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
+    it('returns null when no socket exists', () => {
+      expect(websocketService.getReadyState()).toBeNull();
+    });
 
+    it('returns OPEN after connecting', async () => {
+      await websocketService.connect();
       expect(websocketService.getReadyState()).toBe(MockWebSocket.OPEN);
-    });
-
-    it('should return null when not connected', () => {
-      expect(websocketService.getReadyState()).toBe(null);
-    });
-  });
-
-  describe('Error handling', () => {
-    it('should handle invalid JSON in messages', async () => {
-      const connectPromise = websocketService.connect();
-      vi.advanceTimersByTime(0); // Ensure connection completes
-      await Promise.resolve(); // Flush microtasks
-      await connectPromise;
-
-      const callbacks = {
-        onProgress: vi.fn(),
-        onComplete: vi.fn(),
-        onError: vi.fn(),
-      };
-
-      websocketService.generateGasket(['1', '1', '1'], 2, callbacks);
-
-      // Simulate invalid JSON
-      if (mockWebSocket.onmessage) {
-        const event = new MessageEvent('message', {
-          data: 'invalid json {{{',
-        });
-        mockWebSocket.onmessage(event);
-      }
-
-      expect(callbacks.onError).toHaveBeenCalledWith({
-        type: 'error',
-        message: expect.stringContaining('parse'),
-      });
     });
   });
 });

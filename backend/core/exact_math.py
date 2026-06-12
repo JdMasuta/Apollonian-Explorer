@@ -15,7 +15,7 @@ Reference: .DESIGN_SPEC.md Section 8.4 - Hybrid Exact Arithmetic System
 from fractions import Fraction
 from typing import Union, Tuple
 import sympy as sp
-from sympy import Rational, sqrt, simplify, I, re, im
+from sympy import sqrt, simplify, I, re, im
 
 
 # ============================================================================

@@ -1224,10 +1224,224 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-11 06:40] Revamp Milestone 0: Foundations & Hygiene
+**What was done**: Executed Milestone 0 of REVAMP_BLUEPRINT.md — packaging, CI, lint/type tooling, removal of `sys.path` hacks, dead-code and doc-error cleanup, and the Issue #1 fix.
+**Specifics**:
+- Added `backend/pyproject.toml` (installable package config, pytest `pythonpath`, ruff/black/mypy config; mypy `--strict` scoped to `core/engine`)
+- Added GitHub Actions CI (`.github/workflows/ci.yml`): backend ruff + mypy + pytest, frontend lint + vitest + build
+- Removed unconditional `sys.path.insert` hacks from 10 library/test modules (replaced by pytest `pythonpath` and package config)
+- Deleted dead code in `core/gasket_generator.py` (unreachable block after `raise` in `_initialize_three_circles`)
+- Corrected mathematically wrong docstring example in `core/descartes.py`: `(-1,2,2)` yields the double root `(3,3)` (discriminant 0), not `(6, 2/3)`
+- Rewrote stale `tests/test_descartes.py` against the current hybrid API (old file imported removed `complex_multiply`/`complex_sqrt` and pinned pre-hybrid Fraction-only types; suite did not even collect)
+- Removed ad-hoc scratch scripts `test_phase5/6/6_light/6_minimal/6_depth1/9.py`, `debug_tangency.py` from backend root
+- Fixed ISSUES.md Issue #1: `GasketService` now serializes responses before `commit()` (post-commit attribute expiration caused redundant SELECTs)
+- ruff surfaced two latent bugs, both fixed: `migrations/__init__.py` had a SyntaxError (`from migrations.001_... import` — digit-leading module name; any `import migrations` crashed), and `core/diophantine_generator.py` used `Counter` without importing it
+**Files changed**:
+- `backend/pyproject.toml` - New packaging/tooling config
+- `.github/workflows/ci.yml` - New CI pipeline
+- `backend/core/descartes.py` - sys.path hack removed, docstring example corrected
+- `backend/core/gasket_generator.py` - Dead code removed
+- `backend/services/gasket_service.py` - Issue #1 fix (response-before-commit)
+- `backend/migrations/__init__.py` - SyntaxError fix (ERR-007)
+- `backend/core/diophantine_generator.py` - Missing Counter import
+- `backend/db/base.py`, `db/models/*.py`, `api/*.py` - sys.path hacks removed, unused imports cleaned
+- 7 scratch scripts deleted
+**Tests added**:
+- `backend/tests/test_descartes.py` - Rewritten: 16 tests incl. Descartes quadratic-identity checks
+**Status**: ✅ Complete
+**Notes**: `ruff check` and `mypy` now pass clean; 178 fast-suite tests green in ~1.6s.
+
+---
+
+### [2026-06-11 06:40] Revamp Milestone 1: Exact Inversive-Coordinate Engine
+**What was done**: Implemented the new generation engine (`backend/core/engine/`) per REVAMP_BLUEPRINT.md Phase 2.0/M1: inversive coordinates, Apollonian group reflections, exact seed construction, and a duplicate-free reduced-word walk.
+**Specifics**:
+- `inversive.py`: circles/lines as augmented curvature-center 4-vectors (b̄, b, bx, by); exact invariants Q(v) = −1 and tangency B(v,w) = 1 — no float tolerances anywhere
+- `group.py`: swap reflections Sⱼ: vⱼ ← 2(vₐ+v_b+v_c) − vⱼ (ℤ-linear, square-root free); coefficient matrices for involution tests
+- `seeds.py`: named presets, Descartes-quadruple validation + canonical exact placement, curvature-triple completion, Apollonian strip (lines as b=0 vectors); the only square roots in the system are taken here, at seed time; every seed verified by exact identities
+- `walk.py`: BFS over reduced words (free product ℤ/2⁴) — every circle emitted exactly once, O(1) exact arithmetic per circle; budgets for depth/curvature/count (curvature pruning cuts subtrees → basis for viewport-driven generation in M2)
+- `metrics.py`: integral-bend extraction, residues mod m, prime-bend tagging
+- Integral packings stay in pure machine/big integers end-to-end (verified by test); irrational seeds carry SymPy scalars through linear ops only (no simplify in the loop)
+**Performance**: depth-10 classic gasket = 118,100 circles in ~0.5s (M1 acceptance: <1s). Legacy generator needed minutes for depth 5 and >60s for depth 3 with irrational seeds (Issue #5).
+**Files changed**:
+- `backend/core/engine/{__init__,inversive,group,seeds,walk,metrics}.py` - New engine (~900 lines), mypy --strict clean
+- `backend/core/__init__.py` - New package init documenting engine vs legacy-oracle split
+- `ISSUES.md` - #1 marked fixed; #2/#3/#5 noted as structurally resolved in the engine (legacy path retirement tracked for M2)
+- `DEBUG_LOG.md` - ERR-007, ERR-008 added
+**Tests added**:
+- `backend/tests/engine/test_inversive.py` - Construction, exact invariants, accessors (20 tests)
+- `backend/tests/engine/test_group.py` - Known bends (15,6,6,3), exact reflected coordinates, involution Sⱼ²=id (incl. matrix form over ℤ), invariants along seeded random reduced words
+- `backend/tests/engine/test_seeds.py` - Quadruple validation, pinned exact placements, triple completion (incl. (1,1,1) → 3−2√3), strip
+- `backend/tests/engine/test_walk.py` - 4·3^(g−1) generation law, duplicate-freedom, pinned gen-2 bend multiset [6,6,11,11,14,14,15,23,23,35,38,38], (−11,21,24,28) gen-1 bends, strip walk, budgets, depth-10 perf gate
+- `backend/tests/engine/test_metrics.py` - Residues mod 24 of classic packing = {2,3,6,11,14,15,18,23}, prime bends
+**Status**: ✅ Complete
+**Notes**: 70 engine tests, all exact-equality (no tolerances). Next: Milestone 2 — switch `GasketService`/WebSocket to the engine, schema v2, viewport-driven generation.
+
+---
+
+### [2026-06-11 07:15] Revamp Milestone 2 (slice 1): Service Layer on the Exact Engine
+**What was done**: Switched gasket generation in the API service layer and WebSocket endpoint from the legacy SymPy/BFS generator to the new exact engine, via a thin adapter that preserves the CircleData persistence/serialization contract.
+**Specifics**:
+- New `core/engine_adapter.py`: `generate_circles(curvatures, max_depth, max_circles)` — builds a seed (triple completion or quadruple placement) and streams `CircleData` from the reduced-word walk
+- `EngineCircleData` overrides `to_dict`/`to_database_dict`/`radius` with simplify-free serialization: the legacy exact_math helpers called `sympy.simplify` per scalar (~0.23s/circle, ERR-009); irrational seed (1,2,2) depth 5 now serves 488 circles in ~1.5s (was minutes), rational seeds in ~0.01s
+- `services/gasket_service.py` and `api/endpoints/websocket.py` now consume the adapter; legacy `generate_apollonian_gasket` no longer has production callers (retained for its test suite as an oracle)
+- New capability: 4-curvature seeds now work end-to-end (legacy raised NotImplementedError); quadruples are validated against the Descartes relation with clear errors
+- Semantics note: `generation` now means reduced word length; 3-curvature seeds are completed with the minus (enclosing) branch, the other completion appears at generation 1 — coverage identical, labels shift
+- Fixed a seed-construction hang (ERR-010): `sp.nsimplify` on nested radicals (e.g. seed (3/2, 5/3, 7/4)) ran unboundedly; replaced with `radsimp`/`simplify` — that seed now constructs in 0.5s
+**Files changed**:
+- `backend/core/engine_adapter.py` - New bridge module with EngineCircleData fast serialization
+- `backend/services/gasket_service.py` - Engine-backed generation; removed dead diophantine import
+- `backend/api/endpoints/websocket.py` - Engine-backed streaming
+- `backend/core/engine/{inversive,seeds,metrics}.py` - nsimplify → radsimp/simplify
+- `backend/tests/test_websocket.py` - Mock patch targets renamed to generate_circles
+- `.github/workflows/ci.yml` - API/WebSocket test files restored to the blocking run (now fast)
+**Tests added**:
+- `backend/tests/engine/test_adapter.py` - 9 tests: triple/quadruple seeds, exact centers, caps, error paths, DB-dict roundtrip
+**Results**: full backend CI suite (301 tests) passes in ~8s; test_api_gaskets.py alone went from unfinishable (15+ min) to 6.3s.
+**Status**: ✅ Complete
+**Notes**: Remaining M2 work (schema v2 with inversive coordinates + group words, viewport-driven lazy generation, worker-process WebSocket generation) tracked in REVAMP_BLUEPRINT.md.
+
+---
+
+### [2026-06-11 07:50] Revamp Milestone 3 (slice 1): Frontend Lint & Type Debt
+**What was done**: Cleared all frontend ESLint errors (17 → 0) and the latent null-pointer bug the typing exposed.
+**Specifics**:
+- `GasketCanvas.tsx`: typed Konva refs/events (`Konva.Stage`, `KonvaEventObject<WheelEvent|MouseEvent>`) replacing `any`; the strict typing surfaced that `stage.getPointerPosition()` can return null mid-zoom — added a guard
+- `websocketService.test.ts`: replaced `@ts-ignore` + `(global as any)` WebSocket mocking with `vi.stubGlobal`; `simulateMessage(data: unknown)`
+- `websocketService.ts`, `App.tsx`: removed remaining `any`/unused bindings
+- Vitest WebSocket-service failures (11) are pre-existing Issue #4 (stale port expectations from the Vite-proxy change + fake-timer interplay) — unchanged count, still tracked for the M3 rendering overhaul; CI keeps the vitest step non-blocking until then
+**Files changed**:
+- `frontend/src/components/GasketCanvas/GasketCanvas.tsx` - Konva typing + null guard
+- `frontend/src/services/websocketService.test.ts` - typed global mocking
+- `frontend/src/services/websocketService.ts`, `frontend/src/App.tsx` - lint cleanup
+**Status**: ✅ Complete (lint/types); ⚠️ vitest rehab deferred to M3 proper
+**Notes**: `npx eslint .` now reports 0 errors (2 hook-dependency warnings remain, non-failing); `tsc -b` clean.
+
+---
+
+### [2026-06-12 22:55] WebSocket Connection Audit & Cross-Stack Communication Tests
+**What was done**: Investigated the reported browser WebSocket error with no backend activity; found and fixed two real bugs; rebuilt the frontend WebSocket test suite and added cross-stack protocol contract tests.
+**Specifics**:
+- Verified the wiring live: backend (uvicorn :8000) + Vite dev server (:5173) + `/ws` proxy round-trip a full generation (direct and proxied), including an abort-mid-handshake → reconnect cycle, with backend logging the accepted socket
+- **Bug 1 (ERR-011, the reported symptom)**: React StrictMode's dev mount→cleanup→mount cycle closed the socket while CONNECTING (browser logs "closed before the connection is established") and left `isConnecting` stuck, so the remount's `connect()` rejected and the app stayed disconnected. Fixed: `connect()` is idempotent (shares the in-flight promise), `onclose` rejects pending attempts, `disconnect()` fully resets state
+- **Bug 2 (ERR-012, the "no backend activity")**: root `dev:backend` script hard-required `backend/venv`; without it the backend silently never started while the frontend came up. Now falls back to system Python and fails loudly with instructions
+- Unified WebSocket URL derivation: always same-origin (Vite proxy in dev, backend static host in prod) with `VITE_WS_URL` override — removed the hardcoded `ws://localhost:8000` production fallback
+- Rewrote `websocketService.test.ts`: real timers, deterministic async mock — 19/19 in ~50ms (was 11/17 failing, Issue #4), including a StrictMode-cycle regression test and in-flight-connect sharing
+- Added `backend/tests/test_ws_contract.py`: 8 tests driving the real endpoint and pinning every message shape (progress/complete/error, CircleData fields, "num/denom" string format, non-zero denominators) to the frontend TypeScript interfaces
+- CI: frontend lint and vitest steps are now blocking (previously continue-on-error)
+**Files changed**:
+- `frontend/src/services/websocketService.ts` - connection lifecycle fixes, same-origin URL
+- `frontend/src/services/websocketService.test.ts` - rewritten suite (19 tests)
+- `backend/tests/test_ws_contract.py` - new cross-stack contract tests (8 tests)
+- `package.json` - resilient dev:backend
+- `.github/workflows/ci.yml` - frontend lint/tests blocking
+- `ISSUES.md` (#4 fixed), `DEBUG_LOG.md` (ERR-011, ERR-012)
+**Status**: ✅ Complete
+**Notes**: Backend suite 309 tests / ~9s; frontend 19/19; build + eslint clean. If the browser error persists after pulling: check `curl localhost:8000/health` first — ERR-012 means the backend may simply not be running.
+
+---
+
+### [2026-06-12 04:30] Revamp Milestone 2 (complete): Resolution-Driven Generation, Schema v2, Research Endpoints + Frontend Streaming Fixes
+**What was done**: Diagnosed the five browser-screenshot failures (load-time WS noise, one-generation-per-page, mislabeled "Failed to parse" errors, React "Maximum update depth exceeded", depth-10 pegging a core for tens of minutes) and completed Milestone 2 proper per the approved plan.
+**Specifics — backend**:
+- `core/engine/walk.py`: incremental float mirrors (same ℤ-linear reflection in doubles; zero SymPy evalf per circle — ERR-014) and `WalkBudget.min_radius` resolution pruning (float pruning runs BEFORE the exact reflection, so cut subtrees cost nothing)
+- WebSocket endpoint: generation in a worker thread → asyncio queue (event loop responsive, /health 26ms mid-stream; disconnect cancels via threading.Event); batch 10→500; 10ms/batch sleep removed; additive `min_radius` protocol parameter
+- Schema v2 (`db/models/circle.py`, migration 002): group word (UNIQUE per gasket = identity), exact inversive coordinate strings, indexed float mirrors; `gaskets.min_radius_cached`; service persists directly from walk records with resolution-aware cache coverage
+- New endpoints: `GET /api/gaskets/{id}/circles` (viewport bbox/resolution query on indexed mirrors), `/analytics` (bend histogram, N(T), growth-exponent fit on the depth-complete range vs δ=1.305688; measured 1.03→1.11→1.18 at depths 4/6/8), `/export?format=csv|json` (streaming, with residues mod 24 + prime-bend tags)
+- Serializer bug found by live testing: exactness now chosen PER COMPONENT — (1,1,1) has rational bends with irrational centers and crashed `Fraction(sympy_expr)`; covered by new contract + serializer tests
+- Legacy retirement: `gasket_generator.py`, `diophantine_generator.py`, `engine_adapter.py` and their tests deleted; CI runs the full suite (335 tests, ~12s)
+**Specifics — frontend**:
+- Lazy connection: no connect-on-mount (kills StrictMode console noise, ERR-011); `generateGasket()` auto-connects per run, so the second Generate works (the backend closes the socket after each completion)
+- `handleMessage` separates JSON parsing from callback dispatch — callback exceptions are no longer misreported as parse failures (ERR-013)
+- rAF-throttled ingestion: progress circles buffer in refs and flush to the store once per frame; `maxGeneration` via useMemo; auto-fit keyed on circle count; Stage `onDragEnd` (clears Konva warning)
+- `min_radius` derived from seed extent / canvas size and sent with every generate; favicon added (404 noise)
+**Verified live (backend :8000 + Vite :5173, through the proxy)**: (1,1,1) depth 3 = 56 circles in 0.2s; second generate works; (1,1,1) depth 10 = 6,632 circles in 4.8s (was: minutes of pegged CPU then a frontend crash); classic depth 12 at min_radius 0.0005 = 7,496 circles in 0.2s; analytics/viewport/export endpoints checked.
+**Files changed**: see commits f326199 (backend) and the frontend/docs commit following it.
+**Tests**: backend 335 passing (~12s) incl. new test_api_research.py, test_serializers.py, irrational + min_radius contract tests; frontend 23 passing incl. lazy-connect, reconnect-after-server-close, and error-attribution regressions.
+**Status**: ✅ Complete
+**Notes**: Unpruned irrational deep walks remain SymPy-bound (~1.4ms/circle for exact reflections); the integer-coefficient-over-seed-basis representation (REVAMP_BLUEPRINT.md Phase 2.0) is the future fix if unpruned deep irrational enumeration becomes a research need. Frontend rendering still uses per-node Konva, now safe because streams are resolution-bounded; the WebGL renderer remains Milestone 3.
+
+---
+
+### [2026-06-12 10:30] Revamp Milestone 3 Stage A: Exact Camera, Unclamped Deep Zoom, Word-Replay Deepening
+**What was done**: The rendering/deep-zoom overhaul, stage A of the approved M3 plan: BigInt-rational exact camera with origin rebasing, projection worker owning all circle geometry, single-shape imperative canvas (no per-circle nodes), and viewport-driven deepening that resumes the generation walk at a circle's group word.
+**Specifics — frontend**:
+- `src/math/rational.ts`: exact BigInt rationals; `toNumber` uses adaptive 63-bit scaling (a fixed 2^60 scale truncated tiny residuals — caught by tests) with a two-step descale for subnormal-range values
+- `src/camera/exactCamera.ts`: world anchor as exact rational; screen position = float(exact difference)·scale — pixel-exact at any zoom; pan offsets fold into the anchor beyond 4096px with no drift; **the 0.1–10× zoom clamp is gone**
+- `src/workers/projection.ts` + `mathWorker.ts` + `renderer/rendererClient.ts`: worker owns parsing/exact→relative conversion/culling/hit-testing/`smallestVisible`; main thread receives transferable Float32Array frames (latest-wins coalescing); zustand store slimmed to metadata (circleCount/selectedCircle)
+- `GasketCanvas.tsx` rewritten: ONE Konva Shape with sceneFunc batching strokes by palette bucket; manual pan/zoom/click handlers; math hit-test selection (by word — WS circles have no DB id); auto-fit until first user interaction
+- `App.tsx`: viewport-settle deepening — global ensure to 2e-3 resolution, then iterative local refinement (≤3 rounds, re-anchoring on the smallest visible circles) via the new deepen endpoint
+**Specifics — backend**:
+- `core/engine/walk.py`: `replay_word()` + `walk(start_word=...)` resume the spanning-tree walk at any node (subtree proven equal to the prefix-filtered full walk); schema words are tree addresses
+- `POST /api/gaskets/{id}/deepen` {word, min_radius, max_extra_depth}: local refinement, word-deduplicated persistence, `DEEPEN_MAX_CIRCLES=30000` server defense
+- Incremental cache expansion replaces delete-and-regenerate (`_expand`: union budget walk, insert only new words); `include_circles=false` POST flag + lazy circles relationship for payload-free ensures; `MAX_DENOMINATOR` 1e9→1e15 (full float64 wire precision); `max_depth` cap 15→64; word column 64→128
+**Why local deepening**: live testing showed a GLOBAL resolution of ε costs ~(1/ε)^1.3057 circles (2.5e-6 → ~10⁷ — unfinishable). Resuming at a viewport-scale word bounds each round by (viewport/pixel)^1.3057 regardless of absolute zoom.
+**Verified live (structure-chasing zoom simulation)**: viewport half-width 1 → 1.7e-10 with circles resolved to r=1.9e-13 (word length 34), 2 refinement rounds per ~3-decade jump; bottoms out at the designed 1e-13 wire floor.
+**Known limitation (recorded as ISSUES.md #6)**: zooming onto a *tangency point* (cusp) cannot be served by depth-bounded words — cusp chains have bends growing quadratically (word length ~ 1/viewport), a parabolic fixed point. Generic residual-set points have exponential bend growth (word ~ log(1/ε)) and work as verified. Fix belongs to M5: parabolic subgroup acceleration.
+**Tests**: backend 347 (replay/deepen/expansion/include_circles suites added); frontend 54 (rational/camera/projection suites added); mypy/ruff/eslint/tsc/build clean.
+**Status**: ✅ Complete (Stage A) / Stage B (WebGL instanced renderer) next
+
+---
+
+### [2026-06-12 11:00] Revamp Milestone 3 Stage B: WebGL2 Instanced SDF Renderer
+**What was done**: Replaced the scene-graph rendering path entirely: circles draw as a single instanced WebGL2 batch with the outline evaluated as a signed-distance field per fragment — perfectly anti-aliased at any radius, ~10^5 instances per frame. Canvas2D fallback (same packed-frame input) for non-WebGL2 environments, exercised by unit tests.
+**Specifics**:
+- `frontend/src/renderer/circleRenderer.ts`: `WebGLCircleRenderer` (instanced unit quad, per-instance [sx, sy, rPx, colorT] uploaded directly from the projection worker's transferable frames — zero repacking; SDF ring fragment shader matching the blue→red palette; selection drawn as a second 1-instance call with orange stroke + translucent fill) and `Canvas2DCircleRenderer` (palette-bucketed stroke batching); `createCircleRenderer` picks WebGL2 with graceful fallback
+- `GasketCanvas.tsx`: react-konva removed — plain <canvas> with native non-passive wheel listener (React root wheel listeners are passive; preventDefault is required for zoom), manual drag/click handlers, renderer lifecycle effects
+- `konva` + `react-konva` uninstalled: bundle 776 KB → 476 KB (gzip 151 KB)
+**Tests**: renderer fallback suite added (59 frontend tests total); tsc/eslint/build clean.
+**Status**: ✅ Complete — Milestone 3 done (Stage A + B). M4 (research tooling + WS persistence) next per the approved plan.
+
+---
+
+### [2026-06-12 12:00] Revamp Milestone 4: Research Tooling + WebSocket Persistence
+**What was done**: Closed the long-standing "gasket_id: null" TODO and delivered the researcher-facing UI: coloring metrics, analytics panel, and data export.
+**Specifics — backend**:
+- `persist_walk_records()` (gasket_service.py): WebSocket runs persist on completion from the producer thread (own session; word-deduplicated; conservative cache-coverage merge that never over-claims); `complete` messages now carry the real gasket id (contract + reuse tests added)
+- JSON export gains reproducibility metadata: engine version (core.engine.ENGINE_VERSION), max_depth_cached, min_radius_cached
+**Specifics — frontend**:
+- Coloring metrics evaluated in the projection worker (`ColorMetric`): generation, log|curvature|, residue mod m (default 24 — the local-global classes), parity, prime bends (trial division on wire-scale ints), generator limb; `ColorMetricPicker` in a new Research section
+- `AnalyticsPanel` (@mui/x-charts, user-approved dep): bend histogram + N(T) on log-log axes + growth-exponent fit vs δ ≈ 1.305688, auto-refreshing after generation and deepening rounds
+- `ExportButtons`: CSV/JSON downloads from /export
+**Verified live**: WS run → persisted gasket id → analytics (δ=1.0612 at depth 5) → export with metadata, all through the real server.
+**Tests**: backend 348; frontend 61 (worker metric tests incl. Float32 key handling); all linters/build clean.
+**Status**: ✅ Complete — M5 (group-action explorer incl. parabolic cusp acceleration, ISSUES #6) and M6 (hardening/docs) remain per the approved plan.
+
+---
+
+### [2026-06-12 21:00] Revamp Milestone 5: Group-Action Explorer
+**What was done**: Möbius machinery on inversive coordinates, parabolic cusp acceleration (closes ISSUES #6), strip packings end-to-end, and the TransformPanel UI.
+**Specifics — engine (all exact, all tested)**:
+- `group.invert(mirror, target)`: circle inversion as the Lorentz reflection w + 2B(w,m)·m — involution, preserves Q and all pairwise inner products; inverting in the unit circle swaps curvature↔cocurvature (the definition); members through the mirror's center map to lines
+- `group.dual_circle(quartet, j)` = (Σothers − vⱼ)/2: orthogonal to the fixed three, Q=−1, and invert(D_j, vⱼ) == reflect(quartet, j) — the dual Apollonian group realizing the swaps as Möbius actions (half-integer coordinates for integral packings)
+- `cusp.py`: the chain recurrence C_{n+1} = 2(A+B+C_n) − C_{n−1} solved in closed form C_n = C_0 + nV + n²(A+B); chain words constructed by slot-letter alternation and replay-verified (0 mismatches against the tree walk) — O(1) per element where the tree needs O(n)
+**Specifics — API**: POST /gaskets/{id}/cusp-chain (persists under tree words, idempotent); POST /gaskets/{id}/transform (transient inversion of the cached packing, 'T:'-prefixed identities, lines serialized); strip configuration (0,0,1,1) accepted end-to-end (schema, build_seed→seed_strip, kind="line" wire shape over WS)
+**Specifics — frontend**: worker renders lines as huge pseudo-circles through the same SDF pipeline (no renderer changes); 'orbit (word prefix)' coloring metric; TransformPanel (invert-in-selected / restore, deepening disabled in transformed views); deepening loop falls back to cusp chains when tree refinement stalls at a tangency point; largestVisible worker query
+**Verified live**: strip streams 2 lines + 302 circles; inversion in the bounding circle returns 164 images with exactly 2 lines (the bend-2 circles through the origin); cusp chain to bend 1,052,675 (4n²−1) with verified words in milliseconds.
+**Tests**: backend 368 (test_cusp.py: inversion involution/invariants, dual-group realization, chain bends/words/speed; endpoint suites for cusp/transform/strip); frontend 61; mypy --strict/ruff/eslint/tsc/build clean.
+**Status**: ✅ Complete — only M6 (hardening & release) remains. S₃/S₄ quartet permutation controls were dropped deliberately: they relabel the quartet without changing the circle set (visual no-op).
+
+---
+
+### [2026-06-12 21:30] Revamp Milestone 6: Hardening & Release
+**What was done**: Closed out the roadmap — CI perf gates, API-level e2e smoke in CI, SQLite export, documentation realignment, and an analytics estimator robustness fix found by the e2e run.
+**Specifics**:
+- `backend/benchmark.py`: CI performance gate (integral depth-10 walk ≥ 50k circles/s — measured ~206k/s; irrational budgeted walk ≥ 1k/s) — fails the build on >2x regression
+- `scripts/e2e_smoke.py` + CI `e2e` job: boots the real backend and drives the full research flow over the wire (WS generation classic+strip with line streaming, cache hit, word-replay deepen, parabolic cusp chain, Möbius transform, analytics, all three export formats)
+- SQLite export format (`?format=sqlite`): self-contained research DB with circles + metadata tables (engine version, budgets); tested
+- **Analytics fix (found by e2e)**: the δ-fit window now uses the resolution bound 1/min_radius_cached when available — resolution pruning *guarantees* enumeration completeness below that bend, so local cusp/deepen refinements (which over-densify the tail with N(T)~√T chain data) no longer skew the fit; generation heuristic retained for unpruned caches
+- WS persistence failures now log tracebacks instead of failing silently behind gasket_id=null
+- Documentation: CLAUDE.md's mathematically wrong worked example corrected ((-1,2,3)→(6,2); the old text claimed (-1,2,2)→(6,14/15) — the true value is the double root (3,3)); README rewritten for the current architecture; .DESIGN_SPEC.md and API_USAGE_GUIDE.md marked as historical with pointers to the authoritative docs
+**Deliberately deferred (recorded, not forgotten)**: browser-level Playwright e2e (needs browser binaries in CI; the API-level smoke covers the protocol surface), black --check (codebase not yet black-formatted; ruff enforces correctness rules), Hypothesis property tests (seeded-random equivalents exist in tests/engine/), openapi-typescript client generation, gmpy2/worker-process/coefficient-basis engine options.
+**Verification**: backend 369 tests + ruff + mypy --strict + perf gate; frontend 61 tests + eslint + tsc + build; `scripts/e2e_smoke.py` ALL CHECKS PASSED against a live server.
+**Status**: ✅ Complete — **all roadmap milestones M0–M6 delivered.**
+
+---
+
 ## Statistics
 
-**Total Entries**: 21
-**Completed**: 21
+**Total Entries**: 32
+**Completed**: 32
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2025-11-17 10:45
+**Last Updated**: 2026-06-12 21:30

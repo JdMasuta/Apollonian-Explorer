@@ -4,13 +4,11 @@ Gasket API endpoints.
 Reference: .DESIGN_SPEC.md section 5 (REST API Endpoints)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
-from sqlalchemy.orm import Session
+from typing import Optional
 
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from api.deps import get_db
 from schemas import GasketCreate, GasketResponse
@@ -55,7 +53,9 @@ def create_gasket(
         service = GasketService(db)
         gasket = service.create_or_get_gasket(
             curvatures=gasket_data.curvatures,
-            max_depth=gasket_data.max_depth
+            max_depth=gasket_data.max_depth,
+            min_radius=gasket_data.min_radius,
+            include_circles=gasket_data.include_circles,
         )
         return gasket
 
@@ -102,6 +102,184 @@ def get_gasket(gasket_id: int, db: Session = Depends(get_db)):
         )
 
     return gasket
+
+
+@router.get("/gaskets/{gasket_id}/circles")
+def get_circles_in_viewport(
+    gasket_id: int,
+    min_x: Optional[float] = None,
+    max_x: Optional[float] = None,
+    min_y: Optional[float] = None,
+    max_y: Optional[float] = None,
+    min_radius: Optional[float] = None,
+    limit: int = Query(default=20000, ge=1, le=200000),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve cached circles intersecting a viewport rectangle.
+
+    Filters on the indexed float mirrors (schema v2): a circle is returned
+    when its disk overlaps the bbox and its radius is >= min_radius. All
+    parameters optional; omitted bounds are unconstrained.
+
+    Example:
+        GET /api/gaskets/1/circles?min_x=-0.5&max_x=0.5&min_y=-0.5&max_y=0.5&min_radius=0.01
+
+    Reference:
+        REVAMP_BLUEPRINT.md Milestone 2 (viewport-driven queries)
+    """
+    service = GasketService(db)
+    circles = service.get_circles_in_viewport(
+        gasket_id,
+        min_x=min_x,
+        max_x=max_x,
+        min_y=min_y,
+        max_y=max_y,
+        min_radius=min_radius,
+        limit=limit,
+    )
+
+    if circles is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket with ID {gasket_id} not found"}
+        )
+
+    return {"gasket_id": gasket_id, "count": len(circles), "circles": circles}
+
+
+class DeepenRequest(BaseModel):
+    """Local refinement request: resume the walk at a circle's tree node."""
+
+    word: str = Field(
+        ...,
+        min_length=1,
+        max_length=120,
+        pattern=r"^(S[0-3]|[0-3]+)$",
+        description="Group word of the circle to refine around ('S0'-'S3' for seeds)",
+    )
+    min_radius: float = Field(
+        ..., gt=0, description="Resolution bound for the refinement (model units)"
+    )
+    max_extra_depth: int = Field(
+        default=24, ge=1, le=64, description="Generations to descend below the word"
+    )
+
+
+@router.post("/gaskets/{gasket_id}/deepen")
+def deepen_gasket(
+    gasket_id: int,
+    request: DeepenRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Refine the packing locally around a cached circle (deep-zoom support).
+
+    Resumes the generation walk at the tree node addressed by the circle's
+    group word, bounded by resolution; new circles are persisted and the
+    full local subtree (capped) is returned.
+
+    Reference: REVAMP_BLUEPRINT.md Milestone 3 (viewport-driven deepening).
+    """
+    service = GasketService(db)
+    try:
+        result = service.deepen(
+            gasket_id,
+            word=request.word,
+            min_radius=request.min_radius,
+            max_extra_depth=request.max_extra_depth,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_WORD", "message": str(e)},
+        )
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket with ID {gasket_id} not found"}
+        )
+
+    return result
+
+
+class CuspChainRequest(BaseModel):
+    """Parabolic refinement around the tangency point of two cached circles."""
+
+    word_a: str = Field(..., min_length=1, max_length=120, pattern=r"^(S[0-3]|[0-3]+)$")
+    word_b: str = Field(..., min_length=1, max_length=120, pattern=r"^(S[0-3]|[0-3]+)$")
+    min_radius: float = Field(..., gt=0)
+
+
+@router.post("/gaskets/{gasket_id}/cusp-chain")
+def cusp_chain_endpoint(
+    gasket_id: int,
+    request: CuspChainRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Generate the circle chain converging to the tangency point (cusp) of two
+    circles, via the exact parabolic closed form C_n = C_0 + nV + n²(A+B) —
+    O(1) per element where tree-walk deepening would need O(n) steps
+    (ISSUES.md #6). New circles persist under verified tree words.
+    """
+    service = GasketService(db)
+    try:
+        result = service.deepen_cusp(
+            gasket_id,
+            word_a=request.word_a,
+            word_b=request.word_b,
+            min_radius=request.min_radius,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_CUSP", "message": str(e)},
+        )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket {gasket_id} not found"},
+        )
+    return result
+
+
+class TransformRequest(BaseModel):
+    """Invert the cached packing in one of its circles."""
+
+    mirror_word: str = Field(..., min_length=1, max_length=130)
+    limit: int = Field(default=20000, ge=1, le=100000)
+
+
+@router.post("/gaskets/{gasket_id}/transform")
+def transform_endpoint(
+    gasket_id: int,
+    request: TransformRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Möbius action on the packing: exact inversion (Lorentz reflection on
+    inversive vectors) in the circle addressed by mirror_word. The result is
+    a different packing, returned transiently with 'T:'-prefixed identities;
+    circles through the mirror's center come back as kind="line".
+    """
+    service = GasketService(db)
+    try:
+        result = service.transform_packing(
+            gasket_id, mirror_word=request.mirror_word, limit=request.limit
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error_code": "INVALID_MIRROR", "message": str(e)},
+        )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket {gasket_id} not found"},
+        )
+    return result
 
 
 @router.delete("/gaskets/{gasket_id}", status_code=status.HTTP_204_NO_CONTENT)

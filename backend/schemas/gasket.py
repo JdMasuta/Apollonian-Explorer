@@ -35,8 +35,26 @@ class GasketCreate(BaseModel):
     max_depth: int = Field(
         default=5,
         ge=1,
-        le=15,
-        description="Maximum recursion depth (1-15)",
+        le=64,
+        description=(
+            "Maximum recursion depth (1-64). Deep values are practical only "
+            "together with min_radius, which prunes subtrees by resolution."
+        ),
+    )
+    min_radius: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Resolution bound (model units): circles smaller than this are "
+            "pruned along with their entire subtree. None = no pruning."
+        ),
+    )
+    include_circles: bool = Field(
+        default=True,
+        description=(
+            "When false, the response omits the circle list (use the "
+            "viewport endpoint GET /api/gaskets/{id}/circles instead)."
+        ),
     )
 
     @field_validator("curvatures")
@@ -69,11 +87,14 @@ class GasketCreate(BaseModel):
                     f"Must be a valid fraction string (e.g., '1', '3/2'). Error: {e}"
                 )
 
-        # Check for zero curvatures (infinite radius circles not yet supported)
+        # Zero curvatures are lines. The only supported line configuration
+        # is the Apollonian strip (0, 0, 1, 1) — REVAMP_BLUEPRINT.md M5.
         if any(f == 0 for f in parsed_fractions):
-            raise ValueError(
-                "Zero curvatures (infinite radius circles) are not yet supported"
-            )
+            if sorted(parsed_fractions) != [0, 0, 1, 1]:
+                raise ValueError(
+                    "Zero curvatures (lines) are only supported as the "
+                    "Apollonian strip configuration (0, 0, 1, 1)"
+                )
 
         return v
 

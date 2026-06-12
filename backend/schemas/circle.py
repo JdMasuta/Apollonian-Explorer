@@ -4,7 +4,8 @@ Pydantic schemas for Circle API responses.
 Reference: .DESIGN_SPEC.md section 5 (API Endpoints) and API_USAGE_GUIDE.md
 """
 
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -42,6 +43,10 @@ class CircleResponse(BaseModel):
     )
     radius: str = Field(..., description="Radius as rational string (num/denom)")
     generation: int = Field(..., description="Recursion depth (0 = initial circle)")
+    word: Optional[str] = Field(
+        default=None,
+        description="Reduced word in the Apollonian group ('S0'-'S3' for seeds)",
+    )
     parent_ids: List[int] = Field(
         default_factory=list, description="Parent circle IDs"
     )

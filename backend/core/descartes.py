@@ -23,12 +23,6 @@ Hybrid Arithmetic:
 """
 
 from typing import Tuple
-import sys
-from pathlib import Path
-
-# Add parent directory to path for imports when run as script
-if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.exact_math import (
     ExactNumber,
@@ -75,10 +69,14 @@ def descartes_curvature(
         Tuple of (k4_plus, k4_minus) - the two curvature solutions
 
     Example:
-        >>> from fractions import Fraction
         >>> descartes_curvature(-1, 2, 2)
-        (6, Fraction(2, 3))
-        # Standard Apollonian gasket starting configuration
+        (3, 3)
+        # Discriminant k₁k₂ + k₂k₃ + k₃k₁ = -2 + 4 - 2 = 0, so both
+        # solutions coincide: the two curvature-3 circles of the standard
+        # (-1, 2, 2, 3) gasket are obtained from different center branches.
+
+        >>> descartes_curvature(-1, 2, 3)
+        (6, 2)
 
         >>> descartes_curvature(1, 1, 1)
         # Returns SymPy expressions with sqrt(3) for irrational result
@@ -360,7 +358,6 @@ def _complex_add(z1: ComplexCenter, z2: ComplexCenter) -> ComplexCenter:
 # ============================================================================
 
 if __name__ == "__main__":
-    from fractions import Fraction
 
     print("Descartes Circle Theorem - Hybrid Exact Arithmetic Implementation\n")
     print("=" * 70)

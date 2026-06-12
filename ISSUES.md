@@ -10,8 +10,14 @@ This document tracks identified bugs, potential performance bottlenecks, and req
 
 ### Issue #1: Extraneous Database Query for Gasket Retrieval Post-Update
 
-**Status:** Needs Investigation
+**Status:** ✅ Fixed (2026-06-11, Revamp Milestone 0)
 **Priority:** Medium (Potential Performance Bottleneck)
+
+**Resolution:** Root cause confirmed: `Session.commit()` expires all ORM
+attributes by default, so serializing the gasket *after* the access-tracking
+commit re-SELECTed the gasket and all of its circles. `GasketService` now
+builds the response **before** committing, in both `create_or_get_gasket`
+(cache-hit path) and `get_gasket`. See `backend/services/gasket_service.py`.
 
 **Description**
 
@@ -88,8 +94,19 @@ The current implementation only checks for duplicates against the global `circle
 
 ### Issue #4: Frontend WebSocket Service Test Timing Issues
 
-**Status:** Needs Fix (Non-Critical)
+**Status:** ✅ Fixed (2026-06-11)
 **Priority:** Low (Tests, Service Code Works Correctly)
+
+**Resolution:** The test suite was rewritten with real timers and a
+deterministic async MockWebSocket (no fake-timer macrotask juggling): 19/19
+pass in ~50ms. Investigation also disproved "Service Code Works Correctly":
+the service had a real connection-lifecycle bug — React StrictMode's dev
+mount/unmount/mount cycle aborted the first connect and then wedged the
+service in `isConnecting`, so the page showed a WebSocket error and never
+connected (DEBUG_LOG ERR-011). `connect()` is now idempotent (in-flight
+promise shared) and `disconnect()` fully resets state; the cycle is covered
+by a regression test. Cross-stack message-schema contract tests were added in
+`backend/tests/test_ws_contract.py`.
 
 **Description**
 
@@ -174,7 +191,15 @@ Post-MVP: **Option 1** (refactor MockWebSocket) - Quick fix with high impact
 
 ### Issue #5: SymPy Arithmetic Performance Bottleneck in Deep Gasket Generation
 
-**Status:** Needs Optimization
+**Status:** ✅ Closed (2026-06-12, Revamp Milestone 2) — the
+inversive-coordinate engine generates with linear arithmetic only, carries
+incremental float mirrors (no SymPy evalf per circle, ERR-014), and prunes
+by resolution (`min_radius`), making deep generation output-sensitive:
+(1,1,1) at depth 10 serves ~6.6k circles in ~5s end-to-end (was tens of
+minutes, ERR-014). The legacy generator and its test oracle have been
+deleted; Issues #2 (float-approximate placement) and #3 (incomplete
+deduplication) are resolved structurally in the engine (exact algebraic
+seed verification; the reduced-word walk cannot produce duplicates).
 **Priority:** Medium (Impacts deep gasket generation with irrational configurations)
 **Discovered:** Phase 6 testing (2025-11-13)
 
@@ -286,3 +311,39 @@ Rationale:
 - Phase 6 implementation: Removed `.limit_denominator()`, introduced SymPy preservation
 - Test evidence: `backend/test_phase6_depth1.py` (depth 1 works, depth 3+ times out)
 - Related commit: Phase 6 gasket_generator.py refactoring
+
+---
+
+### Issue #6: Cusp Zoom Requires Parabolic Acceleration
+
+**Status:** ✅ Fixed (2026-06-12, Revamp Milestone 5)
+**Priority:** Medium (Research feature completeness)
+
+**Resolution:** `core/engine/cusp.py` solves the chain recurrence
+C_{n+1} = 2(A+B+C_n) − C_{n−1} in closed form — C_n = C_0 + nV + n²(A+B) —
+so cusp-chain element n costs O(1) exact operations (verified live: bends to
+1,052,675 in milliseconds). Chain circles persist under exact tree words
+(alternating slot letters, replay-verified, dedupe-sound against ordinary
+walks). Exposed as POST /api/gaskets/{id}/cusp-chain; the frontend deepening
+loop falls back to it automatically when tree-depth refinement stalls at a
+tangency point.
+
+**Description**
+
+Viewport deepening resumes the generation walk at a circle's group word, which
+is output-sensitive at GENERIC points of the residual set (bends grow
+exponentially along random reduced words, so word length ~ log(1/ε)). At
+TANGENCY points (cusps), however, the converging circle chains have bends
+growing only quadratically (e.g. the chain 3, 15, 35, 63, … = 4n²−1 at the
+origin cusp of the classic gasket): reaching viewport size ε at a cusp needs
+word length ~ 1/√ε — beyond any practical depth bound. Zooming exactly onto a
+cusp therefore stops resolving new circles once the depth budget (word length
+≤ 128) is exhausted, showing only the two big tangent circles.
+
+**Fix (Milestone 5)**: cusps are parabolic fixed points of the Apollonian
+group. The chain circles are orbits of a single parabolic Möbius
+transformation P fixing the tangency point; applying P^n directly (an O(3,1)
+matrix power on inversive coordinates, computable in closed form) reaches
+chain element n in O(1) instead of O(n) tree steps. Add cusp detection
+(viewport centered between two near-tangent large circles) and a
+parabolic-orbit generator alongside the word-replay deepen endpoint.

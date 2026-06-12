@@ -20,6 +20,14 @@ export interface CircleData {
   };
   radius: string;
   generation: number;
+  /** Reduced word in the Apollonian group ('S0'-'S3' for seed circles). */
+  word?: string;
+  /** 'circle' (default) or 'line' (b = 0, e.g. strip packings). */
+  kind?: 'circle' | 'line';
+  /** Unit normal of a line, as exact fraction strings. */
+  normal?: { x: string; y: string };
+  /** Signed offset d of a line <p, normal> = d. */
+  offset?: string;
   parent_ids: number[];
   tangent_ids: number[];
 }
@@ -88,100 +96,127 @@ class WebSocketService {
   private ws: WebSocket | null = null;
   private url: string;
   private callbacks: WebSocketCallbacks | null = null;
-  private isConnecting: boolean = false;
+  private connectPromise: Promise<void> | null = null;
 
   /**
    * Initialize WebSocket service with URL.
    *
-   * In development mode, uses Vite proxy (ws://localhost:5173/ws/gasket/generate).
-   * In production, connects directly to backend (ws://localhost:8000/ws/gasket/generate).
+   * The URL is derived from the page origin in all modes:
+   * - Development: the Vite dev server proxies /ws to the backend
+   *   (see vite.config.ts).
+   * - Production: the frontend build is served from the backend itself
+   *   (static mount), so same-origin is the backend.
+   * `VITE_WS_URL` overrides this for split deployments.
    *
    * @param url - Optional WebSocket URL override
    */
   constructor(url?: string) {
-    // Determine WebSocket URL based on environment
     if (url) {
       this.url = url;
-    } else if (import.meta.env.DEV) {
-      // Development: Use Vite proxy on same host as frontend
+    } else if (import.meta.env.VITE_WS_URL) {
+      this.url = import.meta.env.VITE_WS_URL;
+    } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       this.url = `${protocol}//${window.location.host}/ws/gasket/generate`;
-    } else {
-      // Production: Connect directly to backend
-      this.url = 'ws://localhost:8000/ws/gasket/generate';
     }
   }
 
   /**
    * Connect to WebSocket server.
    *
+   * Idempotent: while a connection attempt is in flight, subsequent calls
+   * return the same promise instead of rejecting. This matters under React
+   * StrictMode, whose dev-mode mount/unmount/mount cycle calls
+   * connect() / disconnect() / connect() in quick succession.
+   *
    * @returns Promise that resolves when connection is established
    * @throws Error if connection fails
    */
   connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Prevent multiple simultaneous connection attempts
-      if (this.isConnecting) {
-        reject(new Error('Connection already in progress'));
-        return;
-      }
+    // Already connected
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return Promise.resolve();
+    }
 
-      // Already connected
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        resolve();
-        return;
-      }
+    // Connection attempt already in flight: share it
+    if (this.connectPromise) {
+      return this.connectPromise;
+    }
 
-      this.isConnecting = true;
-
+    this.connectPromise = new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url);
+        const ws = new WebSocket(this.url);
+        this.ws = ws;
 
-        this.ws.onopen = () => {
-          this.isConnecting = false;
+        ws.onopen = () => {
+          this.connectPromise = null;
           console.log('[WebSocket] Connected to', this.url);
           resolve();
         };
 
-        this.ws.onerror = (event) => {
-          this.isConnecting = false;
+        ws.onerror = (event) => {
+          this.connectPromise = null;
           console.error('[WebSocket] Connection error:', event);
           reject(new Error('WebSocket connection failed'));
         };
 
-        this.ws.onclose = (event) => {
-          this.isConnecting = false;
+        ws.onclose = (event) => {
+          this.connectPromise = null;
           console.log('[WebSocket] Connection closed:', event.code, event.reason);
-          this.ws = null;
-          this.callbacks = null;
+          // Reject connect() callers if the socket closed before opening
+          // (e.g. disconnect() during StrictMode's first mount cycle).
+          reject(new Error('WebSocket closed before the connection was established'));
+          if (this.ws === ws) {
+            this.ws = null;
+            this.callbacks = null;
+          }
         };
 
-        this.ws.onmessage = (event) => {
+        ws.onmessage = (event) => {
           this.handleMessage(event);
         };
       } catch (error) {
-        this.isConnecting = false;
+        this.connectPromise = null;
         reject(error);
       }
     });
+    return this.connectPromise;
   }
 
   /**
    * Generate an Apollonian gasket with real-time streaming.
    *
+   * Connects on demand: the backend closes the socket after each completed
+   * run (one generation per connection), so this method always ensures a
+   * live connection first (connect() is idempotent).
+   *
    * @param curvatures - Initial curvatures (3 or 4 values as strings)
    * @param maxDepth - Maximum recursion depth (1-15)
    * @param callbacks - Callback functions for progress, complete, and error
+   * @param options - Optional generation parameters:
+   *   minRadius — resolution bound in model units; circles smaller than
+   *   this are pruned server-side along with their subtrees.
    */
-  generateGasket(
+  async generateGasket(
     curvatures: string[],
     maxDepth: number,
-    callbacks: WebSocketCallbacks
-  ): void {
+    callbacks: WebSocketCallbacks,
+    options: { minRadius?: number } = {}
+  ): Promise<void> {
+    try {
+      await this.connect();
+    } catch (error) {
+      callbacks.onError({
+        type: 'error',
+        message: `Could not connect to the server: ${error instanceof Error ? error.message : error}`,
+      });
+      return;
+    }
+
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       callbacks.onError({
         type: 'error',
-        message: 'WebSocket is not connected. Call connect() first.',
+        message: 'WebSocket is not connected.',
       });
       return;
     }
@@ -190,11 +225,14 @@ class WebSocketService {
     this.callbacks = callbacks;
 
     // Send start message
-    const message = {
+    const message: Record<string, unknown> = {
       action: 'start',
       curvatures,
       max_depth: maxDepth,
     };
+    if (options.minRadius !== undefined) {
+      message.min_radius = options.minRadius;
+    }
 
     try {
       this.ws.send(JSON.stringify(message));
@@ -209,6 +247,10 @@ class WebSocketService {
 
   /**
    * Disconnect from WebSocket server.
+   *
+   * Safe to call while a connection attempt is in flight: the pending
+   * connect() promise is rejected and internal state fully reset, so a
+   * subsequent connect() starts cleanly.
    */
   disconnect(): void {
     if (this.ws) {
@@ -217,24 +259,37 @@ class WebSocketService {
       this.ws = null;
       this.callbacks = null;
     }
+    this.connectPromise = null;
   }
 
   /**
    * Handle incoming WebSocket message.
    *
+   * JSON parsing and callback dispatch have separate error handling so an
+   * exception thrown by application code is never misreported as a protocol
+   * parse failure (DEBUG_LOG ERR-013).
+   *
    * @param event - WebSocket message event
    */
   private handleMessage(event: MessageEvent): void {
+    let data: WebSocketMessage;
     try {
-      const data: WebSocketMessage = JSON.parse(event.data);
+      data = JSON.parse(event.data);
+    } catch (error) {
+      console.error('[WebSocket] Failed to parse message:', error);
+      this.callbacks?.onError({
+        type: 'error',
+        message: `Failed to parse message: ${error}`,
+      });
+      return;
+    }
 
-      console.log('[WebSocket] Received message:', data.type);
+    if (!this.callbacks) {
+      console.warn('[WebSocket] Received message but no callbacks registered');
+      return;
+    }
 
-      if (!this.callbacks) {
-        console.warn('[WebSocket] Received message but no callbacks registered');
-        return;
-      }
-
+    try {
       // Route message to appropriate callback
       switch (data.type) {
         case 'progress':
@@ -250,16 +305,19 @@ class WebSocketService {
           break;
 
         default:
-          console.warn('[WebSocket] Unknown message type:', (data as any).type);
+          console.warn(
+            '[WebSocket] Unknown message type:',
+            (data as { type?: string }).type
+          );
       }
     } catch (error) {
-      console.error('[WebSocket] Failed to parse message:', error);
-      if (this.callbacks) {
-        this.callbacks.onError({
-          type: 'error',
-          message: `Failed to parse message: ${error}`,
-        });
-      }
+      // An error thrown by a callback is an application bug; report it as
+      // such (and to the console with its real stack).
+      console.error('[WebSocket] Message handler threw:', error);
+      this.callbacks?.onError({
+        type: 'error',
+        message: `Error handling '${data.type}' message: ${error instanceof Error ? error.message : error}`,
+      });
     }
   }
 

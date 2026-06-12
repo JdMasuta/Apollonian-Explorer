@@ -1,246 +1,254 @@
 /**
- * GasketCanvas - Interactive canvas for visualizing Apollonian gaskets.
+ * GasketCanvas - deep-zoom canvas for Apollonian gaskets.
  *
- * Features:
- * - Circle rendering with react-konva
- * - Pan and zoom functionality
- * - Circle selection
- * - Auto-fit to canvas
- * - Generation-based coloring
+ * Reference: REVAMP_BLUEPRINT.md Milestone 3 (Stages A+B).
  *
- * Reference: IMPLEMENTATION_PLAN.md Phase 3
+ * Architecture: the projection worker (via rendererClient) owns all circle
+ * geometry and sends packed Float32Array frames; this component hands them
+ * to a WebGL2 instanced SDF renderer (Canvas2D fallback) — no per-circle
+ * nodes, no React state per frame, no scene graph. The camera is exact
+ * (BigInt rational anchor), so zoom is unbounded; selection uses a math
+ * hit-test in the worker.
  */
 
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
-import { Stage, Layer, Circle as KonvaCircle } from 'react-konva';
-import type { CircleData } from '../../services/websocketService';
 import {
-  parseValue,
-  curvatureToRadius,
-  calculateBoundingBox,
-  calculateFitTransform,
-  getCircleColor,
-  getStrokeWidth,
-} from './utils';
+  useEffect,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+  useCallback,
+} from 'react';
+import rendererClient from '../../renderer/rendererClient';
+import {
+  createCircleRenderer,
+  type CircleRenderer,
+} from '../../renderer/circleRenderer';
+import {
+  type ExactCamera,
+  createCamera,
+  fitToBounds,
+  pan,
+  serializeCamera,
+  screenToWorldRelative,
+  zoomAt,
+} from '../../camera/exactCamera';
+import { toNumber } from '../../math/rational';
+import type { HitResult } from '../../workers/projection';
 
-/**
- * Props for GasketCanvas component.
- */
+/** Viewport information passed to the deepening callback. */
+export interface ViewportInfo {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  /** Model-space radius of ~half a pixel at the current zoom. */
+  minRadius: number;
+  scale: number;
+}
+
 export interface GasketCanvasProps {
-  circles: CircleData[];
-  selectedCircleId: number | null;
-  onCircleSelect: (id: number | null) => void;
   width: number;
   height: number;
-  autoFit?: boolean; // Auto-fit on circles change
+  onCircleSelect: (circle: HitResult | null) => void;
+  /** Fired ~350ms after the camera stops moving (deepening hook). */
+  onViewportSettle?: (viewport: ViewportInfo) => void;
+  autoFit?: boolean;
 }
 
-/**
- * Transform state for pan/zoom.
- */
-interface TransformState {
-  scale: number;
-  x: number;
-  y: number;
-}
-
-/**
- * Methods exposed via ref.
- */
 export interface GasketCanvasHandle {
   fitToCanvas: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
 }
 
-/**
- * GasketCanvas component.
- *
- * Renders Apollonian gasket circles with interactive pan/zoom.
- *
- * Usage:
- * ```tsx
- * <GasketCanvas
- *   circles={circles}
- *   selectedCircleId={selectedId}
- *   onCircleSelect={setSelectedId}
- *   width={800}
- *   height={600}
- *   autoFit={true}
- * />
- * ```
- */
+const SETTLE_MS = 350;
+
 export const GasketCanvas = forwardRef<GasketCanvasHandle, GasketCanvasProps>(
-  (
-    {
-      circles,
-      selectedCircleId,
-      onCircleSelect,
-      width,
-      height,
-      autoFit = true,
-    },
-    ref
-  ) => {
-  const [transform, setTransform] = useState<TransformState>({
-    scale: 1,
-    x: 0,
-    y: 0,
-  });
+  ({ width, height, onCircleSelect, onViewportSettle, autoFit = true }, ref) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const rendererRef = useRef<CircleRenderer | null>(null);
+    const cameraRef = useRef<ExactCamera>(createCamera());
+    const userInteractedRef = useRef(false);
+    const dragRef = useRef<{ x: number; y: number; moved: number } | null>(null);
+    const settleTimerRef = useRef<number | null>(null);
+    const sizeRef = useRef({ width, height });
+    sizeRef.current = { width, height };
 
-  const stageRef = useRef<any>(null);
-  const [maxGeneration, setMaxGeneration] = useState(0);
+    const pushCamera = useCallback(
+      (camera: ExactCamera) => {
+        cameraRef.current = camera;
+        const { width: w, height: h } = sizeRef.current;
+        rendererClient.setCamera(serializeCamera(camera), w, h);
+        if (onViewportSettle) {
+          if (settleTimerRef.current !== null) {
+            window.clearTimeout(settleTimerRef.current);
+          }
+          settleTimerRef.current = window.setTimeout(() => {
+            settleTimerRef.current = null;
+            const cam = cameraRef.current;
+            const topLeft = screenToWorldRelative(cam, 0, 0, w, h);
+            const bottomRight = screenToWorldRelative(cam, w, h, w, h);
+            const originX = toNumber(cam.originX);
+            const originY = toNumber(cam.originY);
+            onViewportSettle({
+              minX: originX + topLeft.relX,
+              maxX: originX + bottomRight.relX,
+              minY: originY + topLeft.relY,
+              maxY: originY + bottomRight.relY,
+              minRadius: 0.5 / cam.scale,
+              scale: cam.scale,
+            });
+          }, SETTLE_MS);
+        }
+      },
+      [onViewportSettle]
+    );
 
-  // Calculate max generation for coloring
-  useEffect(() => {
-    if (circles.length > 0) {
-      const max = Math.max(...circles.map((c) => c.generation));
-      setMaxGeneration(max);
-    }
-  }, [circles]);
+    const fitToCanvas = useCallback(() => {
+      const { width: w, height: h } = sizeRef.current;
+      rendererClient.getBounds().then((bounds) => {
+        if (bounds) {
+          pushCamera(fitToBounds(bounds, w, h));
+        }
+      });
+    }, [pushCamera]);
 
-  // Auto-fit when circles change
-  useEffect(() => {
-    if (autoFit && circles.length > 0) {
-      fitToCanvas();
-    }
-  }, [circles, autoFit, width, height]);
+    // Renderer lifecycle + frame subscription (imperative, no React state).
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const renderer = createCircleRenderer(canvas);
+      rendererRef.current = renderer;
+      renderer.resize(
+        sizeRef.current.width,
+        sizeRef.current.height,
+        window.devicePixelRatio || 1
+      );
+      const unsubscribe = rendererClient.onFrame((frame) => {
+        renderer.draw(frame);
+      });
+      return () => {
+        unsubscribe();
+        renderer.dispose();
+        rendererRef.current = null;
+      };
+    }, []);
 
-  /**
-   * Fit gasket to canvas with padding.
-   */
-  const fitToCanvas = () => {
-    if (circles.length === 0) return;
+    // Auto-fit while circles stream in, until the user takes over.
+    useEffect(() => {
+      const unsubscribe = rendererClient.onStats((count) => {
+        if (count === 0) {
+          userInteractedRef.current = false;
+          rendererRef.current?.draw(null);
+          return;
+        }
+        if (autoFit && !userInteractedRef.current) {
+          fitToCanvas();
+        }
+      });
+      return unsubscribe;
+    }, [autoFit, fitToCanvas]);
 
-    const bbox = calculateBoundingBox(circles);
-    const fit = calculateFitTransform(bbox, width, height, 0.1);
+    // Resize: renderer surface + re-projection.
+    useEffect(() => {
+      rendererRef.current?.resize(width, height, window.devicePixelRatio || 1);
+      pushCamera(cameraRef.current);
+    }, [width, height, pushCamera]);
 
-    setTransform({
-      scale: fit.scale,
-      x: fit.x,
-      y: fit.y,
-    });
-  };
+    // Non-passive wheel listener (React root wheel listeners are passive, so
+    // preventDefault would be ignored there).
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        userInteractedRef.current = true;
+        const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+        const { width: w, height: h } = sizeRef.current;
+        pushCamera(zoomAt(cameraRef.current, px, py, factor, w, h));
+      };
+      canvas.addEventListener('wheel', onWheel, { passive: false });
+      return () => canvas.removeEventListener('wheel', onWheel);
+    }, [pushCamera]);
 
-  // Expose methods via ref
-  useImperativeHandle(ref, () => ({
-    fitToCanvas,
-  }));
+    useImperativeHandle(ref, () => ({
+      fitToCanvas: () => {
+        userInteractedRef.current = false;
+        fitToCanvas();
+      },
+      zoomIn: () => {
+        userInteractedRef.current = true;
+        pushCamera(zoomAt(cameraRef.current, width / 2, height / 2, 1.5, width, height));
+      },
+      zoomOut: () => {
+        userInteractedRef.current = true;
+        pushCamera(zoomAt(cameraRef.current, width / 2, height / 2, 1 / 1.5, width, height));
+      },
+    }));
 
-  /**
-   * Handle wheel zoom.
-   */
-  const handleWheel = (e: any) => {
-    e.evt.preventDefault();
-
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    const oldScale = transform.scale;
-    const pointer = stage.getPointerPosition();
-
-    // Mouse wheel delta (negative = zoom in, positive = zoom out)
-    const delta = e.evt.deltaY;
-    const scaleBy = 1.1;
-
-    // Calculate new scale
-    const newScale = delta < 0 ? oldScale * scaleBy : oldScale / scaleBy;
-
-    // Limit scale (0.1x to 10x)
-    const boundedScale = Math.max(0.1, Math.min(10, newScale));
-
-    // Calculate new position to zoom toward mouse pointer
-    const mousePointTo = {
-      x: (pointer.x - transform.x) / oldScale,
-      y: (pointer.y - transform.y) / oldScale,
+    const pointerPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     };
 
-    const newX = pointer.x - mousePointTo.x * boundedScale;
-    const newY = pointer.y - mousePointTo.y * boundedScale;
+    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (e.button !== 0) return;
+      const p = pointerPos(e);
+      dragRef.current = { x: p.x, y: p.y, moved: 0 };
+    };
 
-    setTransform({
-      scale: boundedScale,
-      x: newX,
-      y: newY,
-    });
-  };
+    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const p = pointerPos(e);
+      const dx = p.x - drag.x;
+      const dy = p.y - drag.y;
+      if (dx === 0 && dy === 0) return;
+      drag.x = p.x;
+      drag.y = p.y;
+      drag.moved += Math.abs(dx) + Math.abs(dy);
+      if (drag.moved > 2) {
+        userInteractedRef.current = true;
+        pushCamera(pan(cameraRef.current, dx, dy));
+      }
+    };
 
-  /**
-   * Handle circle click.
-   */
-  const handleCircleClick = (circle: CircleData) => {
-    if (circle.id !== undefined) {
-      onCircleSelect(circle.id);
-    }
-  };
+    const handleMouseUp = async (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const drag = dragRef.current;
+      dragRef.current = null;
+      if (!drag) return;
+      if (drag.moved <= 2) {
+        // A click, not a drag: math hit-test in the worker.
+        const p = pointerPos(e);
+        const hit = await rendererClient.hitTest(p.x, p.y);
+        onCircleSelect(hit);
+        rendererClient.setSelected(hit ? hit.word : null);
+      }
+    };
 
-  /**
-   * Handle canvas background click (deselect).
-   */
-  const handleStageClick = (e: any) => {
-    // Only deselect if clicking on the stage itself (not a shape)
-    if (e.target === e.target.getStage()) {
-      onCircleSelect(null);
-    }
-  };
-
-  return (
-    <Stage
-      ref={stageRef}
-      width={width}
-      height={height}
-      onWheel={handleWheel}
-      onClick={handleStageClick}
-      draggable
-      scaleX={transform.scale}
-      scaleY={transform.scale}
-      x={transform.x}
-      y={transform.y}
-      style={{ background: '#fafafa', cursor: 'grab' }}
-    >
-      <Layer>
-        {circles.map((circle, index) => {
-          const x = parseValue(circle.center.x);
-          const y = parseValue(circle.center.y);
-          const radius = curvatureToRadius(circle.curvature);
-          const isSelected = circle.id === selectedCircleId;
-
-          return (
-            <KonvaCircle
-              key={circle.id ?? `circle-${index}`}
-              x={x}
-              y={y}
-              radius={radius}
-              fill={
-                isSelected
-                  ? 'rgba(255, 235, 59, 0.3)' // Yellow highlight
-                  : 'rgba(255, 255, 255, 0.8)'
-              }
-              stroke={
-                isSelected
-                  ? '#f57c00' // Orange stroke for selection
-                  : getCircleColor(circle.generation, maxGeneration)
-              }
-              strokeWidth={getStrokeWidth(radius, isSelected)}
-              onClick={() => handleCircleClick(circle)}
-              onTap={() => handleCircleClick(circle)}
-              onMouseEnter={(e) => {
-                const container = e.target.getStage()?.container();
-                if (container) {
-                  container.style.cursor = 'pointer';
-                }
-              }}
-              onMouseLeave={(e) => {
-                const container = e.target.getStage()?.container();
-                if (container) {
-                  container.style.cursor = 'grab';
-                }
-              }}
-            />
-          );
-        })}
-      </Layer>
-    </Stage>
-  );
-});
+    return (
+      <canvas
+        ref={canvasRef}
+        style={{
+          width,
+          height,
+          background: '#fafafa',
+          cursor: 'grab',
+          display: 'block',
+        }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => {
+          dragRef.current = null;
+        }}
+      />
+    );
+  }
+);
 
 GasketCanvas.displayName = 'GasketCanvas';
 

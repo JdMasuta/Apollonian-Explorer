@@ -10,14 +10,9 @@ with their metadata, caching information, and relationships to circles.
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
-
-# Use relative import
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from db.base import Base
 
@@ -58,6 +53,9 @@ class Gasket(Base):
     # Statistics
     num_circles: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_depth_cached: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Resolution the cache was generated at (model units). NULL = no
+    # resolution pruning, i.e. the full tree up to max_depth_cached.
+    min_radius_cached: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -75,7 +73,9 @@ class Gasket(Base):
         "Circle",
         back_populates="gasket",
         cascade="all, delete-orphan",
-        lazy="selectin",  # Load circles with gasket by default
+        # Lazy-load on access: responses with include_circles=False (the
+        # deepening flow) must not pull the whole packing from SQLite.
+        lazy="select",
     )
 
     def __repr__(self) -> str:

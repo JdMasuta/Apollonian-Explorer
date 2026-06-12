@@ -1,33 +1,30 @@
 /**
- * CanvasContainer - Wrapper component for gasket canvas with controls.
+ * CanvasContainer - wrapper for the deep-zoom gasket canvas with toolbar.
  *
- * Combines GasketCanvas and CanvasToolbar with state management.
- *
- * Reference: IMPLEMENTATION_PLAN.md Phase 3
+ * Reference: REVAMP_BLUEPRINT.md Milestone 3 (Stage A). Circle geometry no
+ * longer flows through props: the canvas subscribes to the projection
+ * worker via rendererClient.
  */
 
 import { useRef, useImperativeHandle, forwardRef } from 'react';
 import { Box } from '@mui/material';
-import GasketCanvas, { type GasketCanvasHandle } from './GasketCanvas';
+import GasketCanvas, {
+  type GasketCanvasHandle,
+  type ViewportInfo,
+} from './GasketCanvas';
 import CanvasToolbar from './CanvasToolbar';
-import type { CircleData } from '../../services/websocketService';
+import type { HitResult } from '../../workers/projection';
 
-/**
- * Props for CanvasContainer component.
- */
 export interface CanvasContainerProps {
-  circles: CircleData[];
-  selectedCircleId: number | null;
-  onCircleSelect: (id: number | null) => void;
+  circleCount: number;
+  onCircleSelect: (circle: HitResult | null) => void;
+  onViewportSettle?: (viewport: ViewportInfo) => void;
   width: number;
   height: number;
   autoFit?: boolean;
   showToolbar?: boolean;
 }
 
-/**
- * Canvas control methods exposed via ref.
- */
 export interface CanvasContainerHandle {
   fitToView: () => void;
   resetView: () => void;
@@ -35,35 +32,15 @@ export interface CanvasContainerHandle {
   zoomOut: () => void;
 }
 
-/**
- * CanvasContainer component with integrated toolbar.
- *
- * Usage:
- * ```tsx
- * const canvasRef = useRef<CanvasContainerHandle>(null);
- *
- * <CanvasContainer
- *   ref={canvasRef}
- *   circles={circles}
- *   selectedCircleId={selectedId}
- *   onCircleSelect={setSelectedId}
- *   width={800}
- *   height={600}
- * />
- *
- * // Later:
- * canvasRef.current?.fitToView();
- * ```
- */
 export const CanvasContainer = forwardRef<
   CanvasContainerHandle,
   CanvasContainerProps
 >(
   (
     {
-      circles,
-      selectedCircleId,
+      circleCount,
       onCircleSelect,
+      onViewportSettle,
       width,
       height,
       autoFit = true,
@@ -73,38 +50,11 @@ export const CanvasContainer = forwardRef<
   ) => {
     const canvasRef = useRef<GasketCanvasHandle>(null);
 
-    /**
-     * Programmatic zoom in.
-     */
-    const zoomIn = () => {
-      // Trigger zoom through event simulation on canvas
-      // For now, user can use mouse wheel
-      console.log('Zoom in');
-    };
+    const zoomIn = () => canvasRef.current?.zoomIn();
+    const zoomOut = () => canvasRef.current?.zoomOut();
+    const fitToView = () => canvasRef.current?.fitToCanvas();
+    const resetView = () => fitToView();
 
-    /**
-     * Programmatic zoom out.
-     */
-    const zoomOut = () => {
-      console.log('Zoom out');
-    };
-
-    /**
-     * Fit gasket to view.
-     */
-    const fitToView = () => {
-      // Canvas auto-fits, so we can trigger re-fit by forcing update
-      canvasRef.current?.fitToCanvas();
-    };
-
-    /**
-     * Reset view to initial state.
-     */
-    const resetView = () => {
-      fitToView();
-    };
-
-    // Expose methods via ref
     useImperativeHandle(ref, () => ({
       fitToView,
       resetView,
@@ -125,9 +75,8 @@ export const CanvasContainer = forwardRef<
       >
         <GasketCanvas
           ref={canvasRef}
-          circles={circles}
-          selectedCircleId={selectedCircleId}
           onCircleSelect={onCircleSelect}
+          onViewportSettle={onViewportSettle}
           width={width}
           height={height}
           autoFit={autoFit}
@@ -139,7 +88,7 @@ export const CanvasContainer = forwardRef<
             onZoomOut={zoomOut}
             onResetView={resetView}
             onFitView={fitToView}
-            disabled={circles.length === 0}
+            disabled={circleCount === 0}
           />
         )}
       </Box>

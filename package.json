@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && . venv/bin/activate && uvicorn main:app --reload --port 8000",
+    "dev:backend": "cd backend && if [ -f venv/bin/activate ]; then . venv/bin/activate; fi && (command -v uvicorn >/dev/null 2>&1 || { echo 'ERROR: uvicorn not found. Run scripts/setup.sh or: pip install -r backend/requirements.txt' >&2; exit 1; }) && uvicorn main:app --reload --port 8000",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
     "deploy": "./scripts/deploy.sh"

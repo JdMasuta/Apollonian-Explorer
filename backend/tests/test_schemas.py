@@ -86,9 +86,9 @@ class TestGasketCreate:
         assert any("max_depth" in str(err) for err in errors)
 
     def test_invalid_max_depth_too_high(self):
-        """Test that max_depth > 15 raises error."""
+        """Test that max_depth > 64 raises error."""
         with pytest.raises(ValidationError) as exc_info:
-            GasketCreate(curvatures=["1", "1", "1"], max_depth=16)
+            GasketCreate(curvatures=["1", "1", "1"], max_depth=65)
 
         errors = exc_info.value.errors()
         assert any("max_depth" in str(err) for err in errors)
