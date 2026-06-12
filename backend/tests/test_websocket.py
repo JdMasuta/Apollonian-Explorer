@@ -1,323 +1,231 @@
 """
-Tests for WebSocket gasket generation endpoint.
+Tests for the WebSocket gasket generation endpoint (protocol + streaming).
 
-Reference: IMPLEMENTATION_PLAN.md Phase 2 Day 5 Task 1
+Reference: REVAMP_BLUEPRINT.md Milestone 2. The cross-stack message-shape
+contract lives in tests/test_ws_contract.py; this file covers validation,
+batching, and error paths with a mocked generator seam
+(api.endpoints.websocket.generate_records).
 """
 
-import pytest
-import json
-from unittest.mock import patch, MagicMock
 from fractions import Fraction
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+from core.engine.inversive import InversiveCircle
+from core.engine.walk import GeneratedCircle
 from main import app
-from core.circle_data import CircleData
+
+
+def make_record(curvature=1, x=0, y=0, generation=0, seed_index=0, word=""):
+    """Build a GeneratedCircle like the walk would emit."""
+    circle = InversiveCircle.from_curvature_center(curvature, x, y)
+    return GeneratedCircle(
+        circle=circle,
+        generation=generation,
+        word=word if generation > 0 else "",
+        seed_index=seed_index,
+        curvature_f=float(curvature),
+        x_f=float(x),
+        y_f=float(y),
+        r_f=1.0 / abs(float(curvature)),
+    )
 
 
 class TestWebSocketGasketGenerate:
     """Tests for WebSocket /ws/gasket/generate endpoint."""
 
     def setup_method(self):
-        """Set up test client for each test."""
         self.client = TestClient(app)
 
+    def collect(self, websocket):
+        """Drain messages until complete/error."""
+        messages = []
+        while True:
+            msg = websocket.receive_json()
+            messages.append(msg)
+            if msg["type"] in ("complete", "error"):
+                return messages
+
     def test_websocket_connection_accepted(self):
-        """Test that WebSocket connection is accepted."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Connection should be established
             assert websocket is not None
 
     def test_websocket_valid_generation_request(self):
-        """Test successful gasket generation with valid parameters."""
-        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
-            # Create mock circle data
-            mock_circles = [
-                CircleData(
-                    curvature=Fraction(1),
-                    center=(Fraction(0), Fraction(0)),
-                    generation=0,
-                    parent_ids=[]
-                ),
-                CircleData(
-                    curvature=Fraction(1),
-                    center=(Fraction(2), Fraction(0)),
-                    generation=0,
-                    parent_ids=[]
-                ),
-                CircleData(
-                    curvature=Fraction(1),
-                    center=(Fraction(1), Fraction(1)),
-                    generation=0,
-                    parent_ids=[]
-                ),
-            ]
-            mock_gen.return_value = iter(mock_circles)
+        with patch("api.endpoints.websocket.generate_records") as mock_gen:
+            mock_gen.return_value = iter(
+                [make_record(1, i, 0, 0, i) for i in range(3)]
+            )
 
             with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-                # Send valid request
-                websocket.send_json({
-                    "action": "start",
-                    "curvatures": ["1", "1", "1"],
-                    "max_depth": 2
-                })
+                websocket.send_json(
+                    {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 2}
+                )
+                messages = self.collect(websocket)
 
-                # Receive messages
-                messages = []
-                try:
-                    while True:
-                        msg = websocket.receive_json()
-                        messages.append(msg)
-                        if msg.get("type") == "complete":
-                            break
-                except:
-                    pass
-
-                # Should have at least progress and complete messages
-                assert len(messages) >= 1
-
-                # Last message should be complete
-                complete_msg = messages[-1]
-                assert complete_msg["type"] == "complete"
-                assert complete_msg["total_circles"] == 3
-                assert complete_msg["gasket_id"] is None  # TODO: Will be implemented later
+        assert messages[-1]["type"] == "complete"
+        assert messages[-1]["total_circles"] == 3
+        assert messages[-1]["gasket_id"] is None
 
     def test_websocket_invalid_json(self):
-        """Test error handling for invalid JSON."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send invalid JSON
             websocket.send_text("not valid json {{{")
-
-            # Should receive error message
             msg = websocket.receive_json()
             assert msg["type"] == "error"
             assert "Invalid JSON" in msg["message"]
 
     def test_websocket_missing_action(self):
-        """Test error handling for missing 'action' field."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send message without action
-            websocket.send_json({
-                "curvatures": ["1", "1", "1"],
-                "max_depth": 2
-            })
-
-            # Should receive error message
+            websocket.send_json({"curvatures": ["1", "1", "1"], "max_depth": 2})
             msg = websocket.receive_json()
             assert msg["type"] == "error"
             assert "action" in msg["message"].lower()
 
-    def test_websocket_invalid_action(self):
-        """Test error handling for invalid action."""
+    def test_websocket_unknown_action(self):
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send invalid action
-            websocket.send_json({
-                "action": "invalid_action",
-                "curvatures": ["1", "1", "1"],
-                "max_depth": 2
-            })
-
-            # Should receive error message
+            websocket.send_json(
+                {"action": "stop", "curvatures": ["1", "1", "1"], "max_depth": 2}
+            )
             msg = websocket.receive_json()
             assert msg["type"] == "error"
             assert "Unknown action" in msg["message"]
 
     def test_websocket_missing_curvatures(self):
-        """Test error handling for missing curvatures."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send without curvatures
-            websocket.send_json({
-                "action": "start",
-                "max_depth": 2
-            })
-
-            # Should receive error message
+            websocket.send_json({"action": "start", "max_depth": 2})
             msg = websocket.receive_json()
             assert msg["type"] == "error"
             assert "curvatures" in msg["message"].lower()
 
     def test_websocket_missing_max_depth(self):
-        """Test error handling for missing max_depth."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send without max_depth
-            websocket.send_json({
-                "action": "start",
-                "curvatures": ["1", "1", "1"]
-            })
-
-            # Should receive error message
+            websocket.send_json({"action": "start", "curvatures": ["1", "1", "1"]})
             msg = websocket.receive_json()
             assert msg["type"] == "error"
             assert "max_depth" in msg["message"].lower()
 
     def test_websocket_invalid_curvatures_count(self):
-        """Test validation error for wrong number of curvatures."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send with only 2 curvatures (need 3-4)
-            websocket.send_json({
-                "action": "start",
-                "curvatures": ["1", "1"],
-                "max_depth": 2
-            })
-
-            # Should receive error message from Pydantic validation
+            websocket.send_json(
+                {"action": "start", "curvatures": ["1", "1"], "max_depth": 2}
+            )
             msg = websocket.receive_json()
             assert msg["type"] == "error"
-            assert "Validation error" in msg["message"] or "curvatures" in msg["message"].lower()
+            assert (
+                "Validation error" in msg["message"]
+                or "curvatures" in msg["message"].lower()
+            )
 
     def test_websocket_invalid_curvature_format(self):
-        """Test validation error for invalid curvature format."""
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send with invalid curvature string
-            websocket.send_json({
-                "action": "start",
-                "curvatures": ["1", "invalid", "1"],
-                "max_depth": 2
-            })
-
-            # Should receive error message
+            websocket.send_json(
+                {"action": "start", "curvatures": ["1", "invalid", "1"], "max_depth": 2}
+            )
             msg = websocket.receive_json()
             assert msg["type"] == "error"
-            assert "invalid" in msg["message"].lower() or "validation" in msg["message"].lower()
+            assert (
+                "invalid" in msg["message"].lower()
+                or "validation" in msg["message"].lower()
+            )
 
-    def test_websocket_zero_curvature(self):
-        """Test validation error for zero curvature (not yet supported)."""
+    def test_websocket_max_depth_too_large(self):
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send with zero curvature
-            websocket.send_json({
-                "action": "start",
-                "curvatures": ["0", "1", "1"],
-                "max_depth": 2
-            })
-
-            # Should receive error message
+            websocket.send_json(
+                {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 50}
+            )
             msg = websocket.receive_json()
             assert msg["type"] == "error"
-            assert "zero" in msg["message"].lower() or "validation" in msg["message"].lower()
+            assert (
+                "validation" in msg["message"].lower()
+                or "max_depth" in msg["message"].lower()
+            )
 
-    def test_websocket_max_depth_out_of_range(self):
-        """Test validation error for max_depth out of range."""
+    def test_websocket_invalid_min_radius(self):
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-            # Send with max_depth too large
-            websocket.send_json({
-                "action": "start",
-                "curvatures": ["1", "1", "1"],
-                "max_depth": 50  # Exceeds limit of 15
-            })
-
-            # Should receive error message
-            msg = websocket.receive_json()
-            assert msg["type"] == "error"
-            assert "validation" in msg["message"].lower() or "max_depth" in msg["message"].lower()
-
-    def test_websocket_batch_streaming(self):
-        """Test that circles are streamed in batches."""
-        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
-            # Create 25 mock circles (should result in 3 messages: 10, 10, 5)
-            mock_circles = []
-            for i in range(25):
-                mock_circles.append(
-                    CircleData(
-                        curvature=Fraction(1),
-                        center=(Fraction(i), Fraction(0)),
-                        generation=i // 10,
-                        parent_ids=[]
-                    )
-                )
-            mock_gen.return_value = iter(mock_circles)
-
-            with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-                websocket.send_json({
+            websocket.send_json(
+                {
                     "action": "start",
                     "curvatures": ["1", "1", "1"],
-                    "max_depth": 3
-                })
+                    "max_depth": 2,
+                    "min_radius": -1,
+                }
+            )
+            msg = websocket.receive_json()
+            assert msg["type"] == "error"
+            assert "validation" in msg["message"].lower()
 
-                # Collect progress messages
-                progress_messages = []
-                complete_message = None
+    def test_websocket_batch_streaming(self):
+        """Circles stream in BATCH_SIZE batches: 1100 -> 500, 500, 100."""
+        with patch("api.endpoints.websocket.generate_records") as mock_gen:
+            mock_gen.return_value = iter(
+                [make_record(1, i, 0, i // 500, 0, word="0" * max(1, i // 500)) for i in range(1100)]
+            )
 
-                try:
-                    while True:
-                        msg = websocket.receive_json()
-                        if msg["type"] == "progress":
-                            progress_messages.append(msg)
-                        elif msg["type"] == "complete":
-                            complete_message = msg
-                            break
-                except:
-                    pass
+            with self.client.websocket_connect("/ws/gasket/generate") as websocket:
+                websocket.send_json(
+                    {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 3}
+                )
+                messages = self.collect(websocket)
 
-                # Should have 3 progress messages (batches of 10, 10, 5)
-                assert len(progress_messages) == 3
+        progress = [m for m in messages if m["type"] == "progress"]
+        assert [m["circles_count"] for m in progress] == [500, 500, 100]
+        for m in progress:
+            assert m["circles_count"] == len(m["circles"])
+        assert messages[-1]["type"] == "complete"
+        assert messages[-1]["total_circles"] == 1100
 
-                # First two batches should have 10 circles each
-                assert progress_messages[0]["circles_count"] == 10
-                assert len(progress_messages[0]["circles"]) == 10
-                assert progress_messages[1]["circles_count"] == 10
-                assert len(progress_messages[1]["circles"]) == 10
+    def test_websocket_min_radius_forwarded(self):
+        """The optional min_radius parameter reaches the generator seam."""
+        with patch("api.endpoints.websocket.generate_records") as mock_gen:
+            mock_gen.return_value = iter([make_record(1, 0, 0, 0, 0)])
 
-                # Last batch should have 5 circles
-                assert progress_messages[2]["circles_count"] == 5
-                assert len(progress_messages[2]["circles"]) == 5
+            with self.client.websocket_connect("/ws/gasket/generate") as websocket:
+                websocket.send_json(
+                    {
+                        "action": "start",
+                        "curvatures": ["1", "1", "1"],
+                        "max_depth": 4,
+                        "min_radius": 0.05,
+                    }
+                )
+                self.collect(websocket)
 
-                # Complete message should report total
-                assert complete_message is not None
-                assert complete_message["total_circles"] == 25
+        mock_gen.assert_called_once_with(["1", "1", "1"], 4, 0.05)
 
     def test_websocket_generation_error(self):
-        """Test error handling during generation."""
-        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
-            # Make generator raise an exception
+        with patch("api.endpoints.websocket.generate_records") as mock_gen:
+
             def raise_error():
                 raise ValueError("Test generation error")
-                yield  # unreachable
+                yield  # unreachable; makes this a generator
 
             mock_gen.return_value = raise_error()
 
             with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-                websocket.send_json({
-                    "action": "start",
-                    "curvatures": ["1", "1", "1"],
-                    "max_depth": 2
-                })
-
-                # Should receive error message
+                websocket.send_json(
+                    {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 2}
+                )
                 msg = websocket.receive_json()
                 assert msg["type"] == "error"
-                assert "generation error" in msg["message"].lower() or "test generation error" in msg["message"].lower()
+                assert "generation error" in msg["message"].lower()
 
     def test_websocket_progress_message_format(self):
-        """Test that progress messages have correct format."""
-        with patch('api.endpoints.websocket.generate_circles') as mock_gen:
-            mock_circles = [
-                CircleData(
-                    curvature=Fraction(1),
-                    center=(Fraction(0), Fraction(0)),
-                    generation=0,
-                    parent_ids=[]
-                )
-            ]
-            mock_gen.return_value = iter(mock_circles)
+        with patch("api.endpoints.websocket.generate_records") as mock_gen:
+            mock_gen.return_value = iter([make_record(2, Fraction(1, 2), 0, 1, 1, word="1")])
 
             with self.client.websocket_connect("/ws/gasket/generate") as websocket:
-                websocket.send_json({
-                    "action": "start",
-                    "curvatures": ["1", "1", "1"],
-                    "max_depth": 1
-                })
+                websocket.send_json(
+                    {"action": "start", "curvatures": ["-1", "2", "2"], "max_depth": 1}
+                )
+                messages = self.collect(websocket)
 
-                # Get first message (should be progress or complete)
-                msg = websocket.receive_json()
-
-                # Check message structure
-                if msg["type"] == "progress":
-                    assert "generation" in msg
-                    assert "circles_count" in msg
-                    assert "circles" in msg
-                    assert isinstance(msg["circles"], list)
-                    assert isinstance(msg["generation"], int)
-                    assert isinstance(msg["circles_count"], int)
-                elif msg["type"] == "complete":
-                    # Small gasket might complete immediately
-                    assert "total_circles" in msg
-                    assert "gasket_id" in msg
+        progress = [m for m in messages if m["type"] == "progress"]
+        assert len(progress) == 1
+        msg = progress[0]
+        assert set(msg.keys()) == {"type", "generation", "circles_count", "circles"}
+        assert isinstance(msg["generation"], int)
+        assert isinstance(msg["circles_count"], int)
+        circle = msg["circles"][0]
+        assert circle["curvature"] == "2/1"
+        assert circle["center"] == {"x": "1/2", "y": "0/1"}
+        assert circle["word"] == "1"

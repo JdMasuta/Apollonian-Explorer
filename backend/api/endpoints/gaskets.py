@@ -4,7 +4,9 @@ Gasket API endpoints.
 Reference: .DESIGN_SPEC.md section 5 (REST API Endpoints)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from api.deps import get_db
@@ -50,7 +52,8 @@ def create_gasket(
         service = GasketService(db)
         gasket = service.create_or_get_gasket(
             curvatures=gasket_data.curvatures,
-            max_depth=gasket_data.max_depth
+            max_depth=gasket_data.max_depth,
+            min_radius=gasket_data.min_radius,
         )
         return gasket
 
@@ -97,6 +100,50 @@ def get_gasket(gasket_id: int, db: Session = Depends(get_db)):
         )
 
     return gasket
+
+
+@router.get("/gaskets/{gasket_id}/circles")
+def get_circles_in_viewport(
+    gasket_id: int,
+    min_x: Optional[float] = None,
+    max_x: Optional[float] = None,
+    min_y: Optional[float] = None,
+    max_y: Optional[float] = None,
+    min_radius: Optional[float] = None,
+    limit: int = Query(default=20000, ge=1, le=200000),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve cached circles intersecting a viewport rectangle.
+
+    Filters on the indexed float mirrors (schema v2): a circle is returned
+    when its disk overlaps the bbox and its radius is >= min_radius. All
+    parameters optional; omitted bounds are unconstrained.
+
+    Example:
+        GET /api/gaskets/1/circles?min_x=-0.5&max_x=0.5&min_y=-0.5&max_y=0.5&min_radius=0.01
+
+    Reference:
+        REVAMP_BLUEPRINT.md Milestone 2 (viewport-driven queries)
+    """
+    service = GasketService(db)
+    circles = service.get_circles_in_viewport(
+        gasket_id,
+        min_x=min_x,
+        max_x=max_x,
+        min_y=min_y,
+        max_y=max_y,
+        min_radius=min_radius,
+        limit=limit,
+    )
+
+    if circles is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error_code": "GASKET_NOT_FOUND", "message": f"Gasket with ID {gasket_id} not found"}
+        )
+
+    return {"gasket_id": gasket_id, "count": len(circles), "circles": circles}
 
 
 @router.delete("/gaskets/{gasket_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -51,12 +51,8 @@ line-length = 100
 select = ["E9", "F63", "F7", "F82", "F401"]
 
 [tool.ruff.lint.per-file-ignores]
-# Legacy modules retain unused imports pending Milestone 1 retirement.
-"core/gasket_generator.py" = ["F401"]
-"core/diophantine_generator.py" = ["F401"]
+# Legacy oracle modules retain unused imports until their retirement.
 "core/circle_data.py" = ["F401"]
-"db/models/circle.py" = ["F401"]
-"services/gasket_service.py" = ["F401"]
 "tests/*" = ["F401"]
 
 [tool.mypy]

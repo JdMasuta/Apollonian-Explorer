@@ -29,6 +29,15 @@ from db.models.gasket import Gasket
 from db.models.circle import Circle
 
 
+def _is_rational(exact: str) -> bool:
+    """True for canonical rational exact strings ('6', '-3/2')."""
+    try:
+        Fraction(exact)
+        return True
+    except (ValueError, ZeroDivisionError):
+        return False
+
+
 @pytest.fixture(scope="function")
 def db_session():
     """
@@ -111,9 +120,8 @@ class TestPostGaskets:
 
     def test_create_gasket_with_database_verification(self, client, db_session):
         """
-        Test database dual storage strategy (INTEGER + TEXT columns).
-
-        Verifies both storage layers populated correctly.
+        Test schema-v2 storage: word identity, exact inversive coordinates,
+        and float mirrors all populated.
         """
         response = client.post("/api/gaskets", json={
             "curvatures": ["1", "2", "2"],
@@ -122,31 +130,26 @@ class TestPostGaskets:
 
         assert response.status_code == 201
 
-        # Query first circle from database
-        circle = db_session.query(Circle).first()
-        assert circle is not None
+        circles = db_session.query(Circle).all()
+        assert circles
 
-        # INTEGER columns should be populated
-        assert isinstance(circle.curvature_num, int)
-        assert isinstance(circle.curvature_denom, int)
-        assert isinstance(circle.center_x_num, int)
-        assert isinstance(circle.center_x_denom, int)
-        assert isinstance(circle.center_y_num, int)
-        assert isinstance(circle.center_y_denom, int)
-        assert isinstance(circle.radius_num, int)
-        assert isinstance(circle.radius_denom, int)
+        words = [c.word for c in circles]
+        assert len(words) == len(set(words)), "words must be unique per gasket"
+        assert {"S0", "S1", "S2", "S3"} <= set(words), "seed circles persisted"
 
-        # TEXT exact columns should be populated
-        assert circle.curvature_exact is not None
-        assert circle.center_x_exact is not None
-        assert circle.center_y_exact is not None
-        assert circle.radius_exact is not None
-
-        # TEXT columns should use tagged format
-        assert circle.curvature_exact.startswith(("int:", "frac:", "sym:"))
-        assert circle.center_x_exact.startswith(("int:", "frac:", "sym:"))
-        assert circle.center_y_exact.startswith(("int:", "frac:", "sym:"))
-        assert circle.radius_exact.startswith(("int:", "frac:", "sym:"))
+        for circle in circles:
+            # Exact inversive coordinates (lossless source of truth)
+            for column in (
+                circle.cocurvature_exact,
+                circle.curvature_exact,
+                circle.kx_exact,
+                circle.ky_exact,
+            ):
+                assert isinstance(column, str) and column
+            # Float mirrors (indexed, for viewport queries)
+            assert isinstance(circle.b_f, float)
+            assert circle.x_f is not None and circle.y_f is not None
+            assert circle.r_f is not None and circle.r_f > 0
 
     def test_create_gasket_fraction_curvatures(self, client, db_session):
         """
@@ -165,12 +168,10 @@ class TestPostGaskets:
         assert data["initial_curvatures"] == ["3/2", "5/3", "7/4"]
         assert data["num_circles"] > 0
 
-        # Check database for fraction storage
+        # Check database for exact fraction storage (canonical 'p/q' strings)
         circles = db_session.query(Circle).all()
-
-        # At least one circle should have fraction curvature
         has_fraction = any(
-            c.curvature_exact and "frac:" in c.curvature_exact
+            "/" in c.curvature_exact and _is_rational(c.curvature_exact)
             for c in circles
         )
         assert has_fraction, "Expected at least one Fraction curvature in database"
@@ -199,24 +200,20 @@ class TestPostGaskets:
         assert data["num_circles"] > 0
         assert data["max_depth_cached"] == 1
 
-        # Check database for SymPy expressions (irrational coordinates)
+        # [1,2,2] produces irrational values (k4 = 5 ± 4√2): exact strings
+        # must preserve them symbolically, never as huge fractions.
         circles = db_session.query(Circle).all()
-        sympy_count = sum(
+        irrational_count = sum(
             1 for c in circles
-            if (c.curvature_exact and "sym:" in c.curvature_exact) or
-               (c.center_x_exact and "sym:" in c.center_x_exact) or
-               (c.center_y_exact and "sym:" in c.center_y_exact)
+            if not _is_rational(c.curvature_exact)
+            or not _is_rational(c.kx_exact)
+            or not _is_rational(c.ky_exact)
         )
+        assert irrational_count > 0, "Expected exact symbolic (irrational) coordinates"
 
-        # [1,2,2] produces irrational coordinates, so we expect SymPy expressions
-        assert sympy_count > 0, "Expected SymPy expressions for irrational coordinates"
-
-        # Verify no huge denominators (that would cause overflow)
-        max_denom = max(
-            max(c.curvature_denom, c.center_x_denom, c.center_y_denom, c.radius_denom)
-            for c in circles
-        )
-        assert max_denom < 10**9, f"Found denominator {max_denom} >= 10^9 (potential overflow)"
+        # Float mirrors stay finite and sane
+        for c in circles:
+            assert abs(c.b_f) < 1e9
 
     def test_irrational_producing_configuration(self, client, db_session):
         """
@@ -230,21 +227,20 @@ class TestPostGaskets:
         })
 
         assert response.status_code == 201
-        data = response.json()
 
-        # Check for SymPy expressions in database
+        # [1,1,1] produces irrational curvatures (3 ± 2√3) and centers;
+        # the exact strings must preserve them symbolically.
         circles = db_session.query(Circle).all()
-
-        # Count circles with SymPy expressions
-        sympy_curv_count = sum(1 for c in circles if c.curvature_exact and "sym:" in c.curvature_exact)
-        sympy_center_count = sum(
-            1 for c in circles
-            if (c.center_x_exact and "sym:" in c.center_x_exact) or
-               (c.center_y_exact and "sym:" in c.center_y_exact)
+        irrational = [
+            c for c in circles
+            if not _is_rational(c.curvature_exact)
+            or not _is_rational(c.kx_exact)
+            or not _is_rational(c.ky_exact)
+        ]
+        assert irrational, "Expected exact symbolic (irrational) values"
+        assert any("sqrt" in c.curvature_exact for c in circles), (
+            "Expected sqrt() expressions in exact curvature strings"
         )
-
-        # [1,1,1] produces irrational curvatures and centers
-        assert sympy_curv_count + sympy_center_count > 0, "Expected SymPy expressions"
 
     def test_cache_hit_sufficient_depth(self, client, db_session):
         """
@@ -462,131 +458,75 @@ class TestDeleteGasket:
 
 
 class TestExactNumberPersistence:
-    """Tests for ExactNumber type preservation through full API flow."""
+    """Exact values survive the full API flow in schema-v2 storage."""
 
-    def test_integer_type_preserved(self, client, db_session):
-        """Test int curvatures stored and retrieved as int."""
+    def test_integer_bends_stored_exactly(self, client, db_session):
+        """Integral packings keep all-integer exact coordinate strings."""
         response = client.post("/api/gaskets", json={
-            "curvatures": ["6", "1", "1"],
-            "max_depth": 1
+            "curvatures": ["-1", "2", "2"],
+            "max_depth": 2
         })
-
         assert response.status_code == 201
 
-        # Check database for int type
         circles = db_session.query(Circle).all()
+        assert circles
+        for c in circles:
+            # Every coordinate of an integral packing is an integer string
+            for column in (c.cocurvature_exact, c.curvature_exact, c.kx_exact, c.ky_exact):
+                assert _is_rational(column)
+                assert Fraction(column).denominator == 1, column
 
-        # Find circle with curvature 6
-        circle_6 = next((c for c in circles if c.curvature_num == 6 and c.curvature_denom == 1), None)
-        assert circle_6 is not None
+        bends = sorted(int(c.curvature_exact) for c in circles)
+        assert bends[:4] == [-1, 2, 2, 3]
 
-        # Verify exact storage
-        assert circle_6.curvature_exact == "int:6"
-
-        # Verify hybrid property returns int
-        assert isinstance(circle_6.curvature_exact_value, int)
-        assert circle_6.curvature_exact_value == 6
-
-    def test_fraction_type_preserved(self, client, db_session):
-        """Test Fraction curvatures stored and retrieved as Fraction."""
+    def test_fraction_values_stored_exactly(self, client, db_session):
+        """Rational (non-integral) packings keep exact p/q strings."""
+        scaled = [str(Fraction(k, 5)) for k in (-1, 2, 2)]
         response = client.post("/api/gaskets", json={
-            "curvatures": ["3/2", "5/3", "7/4"],
+            "curvatures": scaled,
             "max_depth": 1
         })
-
         assert response.status_code == 201
 
-        # Check database for Fraction type
         circles = db_session.query(Circle).all()
+        for c in circles:
+            assert _is_rational(c.curvature_exact)
+        assert any(Fraction(c.curvature_exact).denominator > 1 for c in circles)
 
-        # Find circles with fraction curvatures
-        fraction_circles = [c for c in circles if "frac:" in (c.curvature_exact or "")]
-        assert len(fraction_circles) > 0, "Expected Fraction curvatures"
-
-        # Verify one of them
-        circle = fraction_circles[0]
-        assert circle.curvature_exact.startswith("frac:")
-        assert isinstance(circle.curvature_exact_value, Fraction)
-
-    def test_sympy_type_preserved(self, client, db_session):
-        """Test SymPy expressions stored and retrieved as sp.Expr."""
+    def test_sympy_values_stored_symbolically(self, client, db_session):
+        """Irrational values persist as symbolic expressions, reparseable."""
         response = client.post("/api/gaskets", json={
             "curvatures": ["1", "1", "1"],
             "max_depth": 1
         })
-
         assert response.status_code == 201
 
-        # Check database for SymPy type
-        circles = db_session.query(Circle).all()
-
-        # Find circles with SymPy expressions
-        sympy_circles = [
-            c for c in circles
-            if any("sym:" in (getattr(c, col) or "")
-                   for col in ["curvature_exact", "center_x_exact", "center_y_exact"])
+        symbolic = [
+            c for c in db_session.query(Circle).all()
+            if not _is_rational(c.curvature_exact)
         ]
-        assert len(sympy_circles) > 0, "Expected SymPy expressions"
+        assert symbolic
+        for c in symbolic:
+            parsed = sp.sympify(c.curvature_exact)
+            # Float mirror must agree with the exact value
+            assert abs(float(parsed) - c.b_f) < 1e-9
 
-        # Verify SymPy expressions parse correctly
-        for circle in sympy_circles:
-            if circle.curvature_exact and "sym:" in circle.curvature_exact:
-                assert isinstance(circle.curvature_exact_value, sp.Expr)
-            if circle.center_y_exact and "sym:" in circle.center_y_exact:
-                assert isinstance(circle.center_y_exact_value, sp.Expr)
-
-    def test_mixed_types_in_single_gasket(self, client, db_session):
-        """Test gasket with circles having different ExactNumber types."""
+    def test_float_mirrors_consistent_with_exact(self, client, db_session):
+        """Float mirrors equal the exact values for rational packings."""
         response = client.post("/api/gaskets", json={
-            "curvatures": ["1", "2", "2"],
+            "curvatures": ["-1", "2", "2"],
             "max_depth": 2
         })
-
         assert response.status_code == 201
 
-        circles = db_session.query(Circle).all()
-
-        # Check for type variety across all circles
-        has_int = any(
-            c.curvature_exact and c.curvature_exact.startswith("int:")
-            for c in circles
-        )
-        has_fraction = any(
-            c.curvature_exact and c.curvature_exact.startswith("frac:")
-            for c in circles
-        )
-        has_sympy = any(
-            any("sym:" in (getattr(c, col) or "")
-                for col in ["curvature_exact", "center_x_exact", "center_y_exact", "radius_exact"])
-            for c in circles
-        )
-
-        # Should have at least int or fraction
-        assert has_int or has_fraction, "Expected int or Fraction types"
-        # [1,2,2] produces irrational coordinates, so SymPy should exist
-        assert has_sympy, "Expected SymPy expressions in coordinates"
-
-    def test_hybrid_property_fallback(self, client, db_session):
-        """Test hybrid property fallback to INTEGER columns when TEXT is NULL."""
-        # Create a gasket
-        response = client.post("/api/gaskets", json={
-            "curvatures": ["1", "2", "2"],
-            "max_depth": 1
-        })
-
-        assert response.status_code == 201
-
-        circle = db_session.query(Circle).first()
-
-        # Manually clear TEXT column to test fallback
-        circle.curvature_exact = None
-        db_session.commit()
-        db_session.refresh(circle)
-
-        # Verify fallback works
-        exact_value = circle.curvature_exact_value
-        assert isinstance(exact_value, Fraction)
-        assert exact_value == Fraction(circle.curvature_num, circle.curvature_denom)
+        for c in db_session.query(Circle).all():
+            b = Fraction(c.curvature_exact)
+            assert abs(float(b) - c.b_f) < 1e-12
+            if b != 0:
+                x = Fraction(c.kx_exact) / b
+                y = Fraction(c.ky_exact) / b
+                assert abs(float(x) - c.x_f) < 1e-9
+                assert abs(float(y) - c.y_f) < 1e-9
 
 
 class TestCachingBehavior:

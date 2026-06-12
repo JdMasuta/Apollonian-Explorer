@@ -38,6 +38,14 @@ class GasketCreate(BaseModel):
         le=15,
         description="Maximum recursion depth (1-15)",
     )
+    min_radius: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Resolution bound (model units): circles smaller than this are "
+            "pruned along with their entire subtree. None = no pruning."
+        ),
+    )
 
     @field_validator("curvatures")
     @classmethod

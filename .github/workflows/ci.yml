@@ -27,13 +27,8 @@ jobs:
       - name: Type-check engine (mypy --strict)
         run: |
           if [ -d core/engine ]; then mypy; fi
-      # test_gasket_generator.py exercises the retired legacy SymPy generator
-      # (kept as a cross-check oracle) and takes many minutes (ISSUES.md
-      # Issue #5); it is excluded until the legacy module is removed.
       - name: Tests
-        run: >
-          python -m pytest tests/ -q
-          --ignore=tests/test_gasket_generator.py
+        run: python -m pytest tests/ -q
 
   frontend:
     runs-on: ubuntu-latest

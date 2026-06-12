@@ -1,207 +1,222 @@
 """
 WebSocket endpoint for real-time gasket generation streaming.
 
-Reference: IMPLEMENTATION_PLAN.md Phase 2 Day 5 Task 1
-Reference: DESIGN_SPEC.md section 5.3 (WebSocket API)
+Reference: REVAMP_BLUEPRINT.md Milestone 2; .DESIGN_SPEC.md section 5.3.
 
-This module implements the WebSocket endpoint for streaming Apollonian gasket
-generation in real-time. Clients connect, send initial parameters, and receive
-circles in batches as they are generated.
+Protocol (v1-compatible, additive):
+1. Client connects to /ws/gasket/generate
+2. Client sends: {"action": "start", "curvatures": [...], "max_depth": N,
+                  "min_radius": optional float}
+3. Server streams: {"type": "progress", "generation": g,
+                    "circles_count": n, "circles": [...]}
+4. Server ends with {"type": "complete", "gasket_id": null, "total_circles": N}
+   or {"type": "error", "message": "..."} and closes (one run per connection;
+   the frontend reconnects per generate).
+
+Generation runs in a worker thread feeding an asyncio queue, so the event
+loop (and every other client) stays responsive during deep walks; a client
+disconnect stops the producer via a threading.Event.
 """
 
 import asyncio
 import json
-from fractions import Fraction
+import threading
+from typing import Iterator, List, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from core.engine_adapter import generate_circles
+from core.engine.walk import GeneratedCircle, WalkBudget, walk
 from schemas import GasketCreate
+from services.gasket_service import build_seed, parse_curvature_string
+from services.serializers import record_to_api_circle
 
 router = APIRouter()
+
+#: Circles per progress message. Large batches keep message counts low so the
+#: client is not flooded (DEBUG_LOG ERR-013); 500 circles ≈ 60 KB JSON.
+BATCH_SIZE = 500
+
+#: Producer -> consumer queue depth (backpressure bound).
+QUEUE_MAX = 8
+
+
+def generate_records(
+    curvatures: List[str], max_depth: int, min_radius: Optional[float]
+) -> Iterator[GeneratedCircle]:
+    """Seed and walk a packing from API curvature strings.
+
+    Module-level seam so tests can patch generation. Lines (only possible
+    from strip seeds, which the API schema rejects) are skipped defensively.
+    """
+    parsed = [parse_curvature_string(c) for c in curvatures]
+    seed = build_seed(parsed)
+    budget = WalkBudget(max_depth=max_depth, min_radius=min_radius)
+    for record in walk(seed, budget):
+        if record.circle.is_line:
+            continue
+        yield record
+
+
+def _produce(
+    curvatures: List[str],
+    max_depth: int,
+    min_radius: Optional[float],
+    queue: "asyncio.Queue[dict]",
+    loop: asyncio.AbstractEventLoop,
+    stop: threading.Event,
+) -> None:
+    """Worker thread: run the walk, push batched messages onto the queue."""
+
+    def put(message: dict) -> None:
+        asyncio.run_coroutine_threadsafe(queue.put(message), loop).result()
+
+    total = 0
+    batch: List[dict] = []
+    last_generation = 0
+    try:
+        for record in generate_records(curvatures, max_depth, min_radius):
+            if stop.is_set():
+                return
+            batch.append(record_to_api_circle(record))
+            last_generation = record.generation
+            total += 1
+            if len(batch) >= BATCH_SIZE:
+                put(
+                    {
+                        "type": "progress",
+                        "generation": last_generation,
+                        "circles_count": len(batch),
+                        "circles": batch,
+                    }
+                )
+                batch = []
+
+        if batch and not stop.is_set():
+            put(
+                {
+                    "type": "progress",
+                    "generation": last_generation,
+                    "circles_count": len(batch),
+                    "circles": batch,
+                }
+            )
+        if not stop.is_set():
+            put({"type": "complete", "gasket_id": None, "total_circles": total})
+    except Exception as e:  # surfaced to the client as a protocol error
+        if not stop.is_set():
+            put({"type": "error", "message": f"Generation error: {str(e)}"})
 
 
 @router.websocket("/ws/gasket/generate")
 async def websocket_gasket_generate(websocket: WebSocket):
-    """
-    WebSocket endpoint for real-time gasket generation streaming.
-
-    Protocol:
-    1. Client connects to /ws/gasket/generate
-    2. Client sends: {"action": "start", "curvatures": ["1", "1", "1"], "max_depth": 5}
-    3. Server streams progress messages with batches of circles
-    4. Server sends completion message when done
-
-    Message Types:
-    - Progress: {"type": "progress", "generation": N, "circles_count": M, "circles": [...]}
-    - Complete: {"type": "complete", "gasket_id": null, "total_circles": N}
-    - Error: {"type": "error", "message": "..."}
-
-    Args:
-        websocket: FastAPI WebSocket connection
-
-    Reference:
-        IMPLEMENTATION_PLAN.md lines 836-923 (Day 5 Task 1)
-    """
+    """Stream gasket generation over a WebSocket (see module docstring)."""
     await websocket.accept()
 
     try:
-        # Step 1: Receive initial request message
+        # ---- Request validation (shapes unchanged from v1) ----
         data = await websocket.receive_text()
 
         try:
             message = json.loads(data)
         except json.JSONDecodeError as e:
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Invalid JSON: {str(e)}"
-            })
+            await websocket.send_json(
+                {"type": "error", "message": f"Invalid JSON: {str(e)}"}
+            )
             await websocket.close()
             return
 
-        # Step 2: Validate message structure
         if not isinstance(message, dict):
-            await websocket.send_json({
-                "type": "error",
-                "message": "Message must be a JSON object"
-            })
+            await websocket.send_json(
+                {"type": "error", "message": "Message must be a JSON object"}
+            )
             await websocket.close()
             return
 
         action = message.get("action")
         if action != "start":
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Unknown action: '{action}'. Expected 'start'."
-            })
+            await websocket.send_json(
+                {"type": "error", "message": f"Unknown action: {action!r}. Expected 'start'."}
+            )
             await websocket.close()
             return
 
-        # Step 3: Extract and validate parameters
         curvatures = message.get("curvatures")
         max_depth = message.get("max_depth")
-
         if curvatures is None:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Missing required field: 'curvatures'"
-            })
+            await websocket.send_json(
+                {"type": "error", "message": "Missing required field: 'curvatures'"}
+            )
             await websocket.close()
             return
-
         if max_depth is None:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Missing required field: 'max_depth'"
-            })
+            await websocket.send_json(
+                {"type": "error", "message": "Missing required field: 'max_depth'"}
+            )
             await websocket.close()
             return
 
-        # Step 4: Validate using Pydantic schema (reuse existing validation)
         try:
-            validated = GasketCreate(curvatures=curvatures, max_depth=max_depth)
+            validated = GasketCreate(
+                curvatures=curvatures,
+                max_depth=max_depth,
+                min_radius=message.get("min_radius"),
+            )
         except ValidationError as e:
-            # Extract error messages from Pydantic validation
-            error_messages = []
-            for error in e.errors():
-                field = ".".join(str(loc) for loc in error["loc"])
-                error_messages.append(f"{field}: {error['msg']}")
-
-            await websocket.send_json({
-                "type": "error",
-                "message": "Validation error: " + "; ".join(error_messages)
-            })
+            details = "; ".join(
+                f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+                for err in e.errors()
+            )
+            await websocket.send_json(
+                {"type": "error", "message": "Validation error: " + details}
+            )
             await websocket.close()
             return
 
-        # Step 5: Parse curvatures as Fractions
-        try:
-            curvature_fractions = [Fraction(c) for c in validated.curvatures]
-        except (ValueError, ZeroDivisionError) as e:
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Invalid curvature format: {str(e)}"
-            })
-            await websocket.close()
-            return
-
-        # Step 6: Generate gasket with streaming
-        total_circles = 0
-        batch = []
-        batch_size = 10
+        # ---- Generation in a worker thread, streaming from a queue ----
+        queue: "asyncio.Queue[dict]" = asyncio.Queue(maxsize=QUEUE_MAX)
+        stop = threading.Event()
+        loop = asyncio.get_running_loop()
+        producer = loop.run_in_executor(
+            None,
+            _produce,
+            validated.curvatures,
+            validated.max_depth,
+            validated.min_radius,
+            queue,
+            loop,
+            stop,
+        )
 
         try:
-            # Stream from the exact inversive-coordinate engine
-            # (REVAMP_BLUEPRINT.md Milestone 2)
-            for circle_data in generate_circles(
-                curvature_fractions,
-                validated.max_depth,
-            ):
-                batch.append(circle_data.to_dict())
-                total_circles += 1
-
-                # Send batch when it reaches batch_size
-                if len(batch) >= batch_size:
-                    await websocket.send_json({
-                        "type": "progress",
-                        "generation": circle_data.generation,
-                        "circles_count": len(batch),
-                        "circles": batch
-                    })
-
-                    batch = []  # Clear batch
-
-                    # Small delay to prevent overwhelming client
-                    await asyncio.sleep(0.01)
-
-            # Send remaining circles in final batch
-            if batch:
-                await websocket.send_json({
-                    "type": "progress",
-                    "generation": batch[-1]["generation"],
-                    "circles_count": len(batch),
-                    "circles": batch
-                })
-
-            # Step 7: Send completion message
-            # TODO: Save gasket to database and return gasket_id
-            # For now, gasket_id is null - will implement in later phase
-            await websocket.send_json({
-                "type": "complete",
-                "gasket_id": None,
-                "total_circles": total_circles
-            })
-
-        except Exception as e:
-            # Handle errors during generation
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Generation error: {str(e)}"
-            })
-            await websocket.close()
-            return
+            while True:
+                message_out = await queue.get()
+                await websocket.send_json(message_out)
+                if message_out["type"] in ("complete", "error"):
+                    break
+        except WebSocketDisconnect:
+            raise
+        finally:
+            stop.set()
+            # Unblock a producer waiting on a full queue, then let it finish.
+            while not queue.empty():
+                queue.get_nowait()
+            try:
+                await producer
+            except Exception:
+                pass
 
     except WebSocketDisconnect:
-        # Client disconnected - gracefully handle
-        # No need to send message as connection is already closed
         pass
-
     except Exception as e:
-        # Unexpected error - try to send error message if connection still open
         try:
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Server error: {str(e)}"
-            })
-        except:
-            # Connection already closed, nothing we can do
+            await websocket.send_json(
+                {"type": "error", "message": f"Server error: {str(e)}"}
+            )
+        except Exception:
             pass
-
     finally:
-        # Ensure connection is closed
         try:
             await websocket.close()
-        except:
-            # Already closed
+        except Exception:
             pass

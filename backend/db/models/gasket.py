@@ -10,7 +10,7 @@ with their metadata, caching information, and relationships to circles.
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Integer, String, Text, DateTime
+from sqlalchemy import DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -53,6 +53,9 @@ class Gasket(Base):
     # Statistics
     num_circles: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     max_depth_cached: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Resolution the cache was generated at (model units). NULL = no
+    # resolution pruning, i.e. the full tree up to max_depth_cached.
+    min_radius_cached: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

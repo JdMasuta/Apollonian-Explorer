@@ -126,6 +126,93 @@ class TestBudgets:
         assert all(isinstance(c, GeneratedCircle) for c in circles)
 
 
+class TestFloatMirrors:
+    def test_mirrors_match_exact_classic(self):
+        """Float mirrors agree with the exact values (integral packing)."""
+        for c in classic_walk(5):
+            x, y = c.circle.center()
+            assert abs(c.curvature_f - float(c.circle.curvature)) <= 1e-9 * max(
+                1.0, abs(float(c.circle.curvature))
+            )
+            assert abs(c.x_f - float(x)) <= 1e-9
+            assert abs(c.y_f - float(y)) <= 1e-9
+            assert abs(c.r_f - float(c.circle.radius())) <= 1e-9
+
+    def test_mirrors_match_exact_irrational(self):
+        """Float mirrors agree with exact SymPy values for irrational seeds."""
+        from core.engine.seeds import seed_from_triple
+
+        circles = list(walk(seed_from_triple(1, 1, 1), WalkBudget(max_depth=4)))
+        for c in circles:
+            exact_b = float(c.circle.curvature)
+            assert abs(c.curvature_f - exact_b) <= 1e-9 * max(1.0, abs(exact_b))
+            x, y = c.circle.center()
+            assert abs(c.x_f - float(x)) <= 1e-9
+            assert abs(c.y_f - float(y)) <= 1e-9
+
+    def test_lines_have_no_center_mirror(self):
+        circles = list(walk(seed_strip(), WalkBudget(max_depth=1)))
+        lines = [c for c in circles if c.circle.is_line]
+        assert lines, "strip seed should include lines"
+        for c in lines:
+            assert c.curvature_f == 0.0
+            assert c.x_f is None and c.y_f is None and c.r_f is None
+
+    def test_no_sympy_float_conversion_in_loop(self):
+        """Generation must not call float() on SymPy scalars per circle.
+
+        Guard against ERR-014: per-circle evalf made irrational walks take
+        ~0.2s+ per circle. Depth-6 (1,1,1) is ~1.5k circles, ~0.5s with
+        mirror-based pruning; it would be minutes with per-circle evalf."""
+        from core.engine.seeds import seed_from_triple
+
+        seed = seed_from_triple(1, 1, 1)
+        start = time.time()
+        count = sum(1 for _ in walk(seed, WalkBudget(max_depth=6)))
+        elapsed = time.time() - start
+        assert count == 4 + 2 * (3**6 - 1)
+        assert elapsed < 5.0, f"irrational depth-6 walk took {elapsed:.2f}s"
+
+    def test_budgeted_deep_irrational_walk_is_fast(self):
+        """Resolution-budgeted deep walks on irrational seeds are the real
+        serving workload (Milestone 2): depth 15 at 0.3% resolution."""
+        from core.engine.seeds import seed_from_triple
+
+        seed = seed_from_triple(1, 1, 1)
+        start = time.time()
+        count = sum(
+            1 for _ in walk(seed, WalkBudget(max_depth=15, min_radius=0.003))
+        )
+        elapsed = time.time() - start
+        assert count > 100
+        assert elapsed < 5.0, f"budgeted depth-15 walk took {elapsed:.2f}s"
+
+
+class TestResolutionBudget:
+    def test_min_radius_prunes(self):
+        full = classic_walk(6)
+        pruned = list(
+            walk(seed_from_preset("classic"), WalkBudget(max_depth=6, min_radius=0.05))
+        )
+        assert len(pruned) < len(full)
+        for c in pruned:
+            if not c.circle.is_line:
+                assert c.r_f >= 0.05
+
+    def test_min_radius_bounds_deep_walks(self):
+        """Resolution-budgeted deep walks are output-sensitive: the count is
+        set by the resolution, not the depth."""
+        coarse = list(
+            walk(seed_from_preset("classic"), WalkBudget(max_depth=12, min_radius=0.01))
+        )
+        # Unbounded depth-12 would be ~1M circles; at 1% resolution it is small.
+        assert len(coarse) < 3000
+
+    def test_min_radius_keeps_lines(self):
+        circles = list(walk(seed_strip(), WalkBudget(max_depth=3, min_radius=0.2)))
+        assert any(c.circle.is_line for c in circles)
+
+
 class TestPerformance:
     def test_depth_ten_under_budget(self):
         """Milestone 1 acceptance: depth-10 classic gasket in < 5s in CI
