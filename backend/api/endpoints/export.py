@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from api.deps import get_db
+from core.engine import ENGINE_VERSION
 from db import Circle, Gasket
 
 router = APIRouter()
@@ -87,10 +88,16 @@ def _iter_csv(circles) -> Iterator[str]:
 
 
 def _iter_json(gasket: Gasket, circles) -> Iterator[str]:
-    yield (
-        '{"gasket_id": %d, "initial_curvatures": %s, "circles": ['
-        % (gasket.id, gasket.initial_curvatures)
-    )
+    # Reproducibility metadata: seed + engine version + generation budget.
+    header = {
+        "gasket_id": gasket.id,
+        "initial_curvatures": json.loads(gasket.initial_curvatures),
+        "engine_version": ENGINE_VERSION,
+        "max_depth_cached": gasket.max_depth_cached,
+        "min_radius_cached": gasket.min_radius_cached,
+    }
+    yield json.dumps(header)[:-1] + ', "circles": ['
+
     first = True
     for circle in circles:
         prefix = "" if first else ","

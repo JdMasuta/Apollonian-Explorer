@@ -60,6 +60,80 @@ def build_seed(curvatures: List[ExactNumber]):
     raise ValueError(f"Need 3 or 4 initial curvatures, got {len(curvatures)}")
 
 
+def persist_walk_records(
+    curvatures: List[str],
+    max_depth: int,
+    min_radius: Optional[float],
+    records: list,
+) -> Optional[int]:
+    """Persist a completed WebSocket run (worker thread; own session).
+
+    Cache-aware: if a gasket with the same curvature hash exists, only new
+    words are inserted. Coverage metadata merges conservatively (max depth,
+    COARSER resolution), which never over-claims coverage. Returns the
+    gasket id, or None if persistence failed (streaming already succeeded;
+    persistence is best-effort).
+    """
+    from db.base import SessionLocal
+
+    session = SessionLocal()
+    try:
+        service = GasketService(session)
+        gasket_hash = service._generate_hash(curvatures)
+        gasket = session.query(Gasket).filter(Gasket.hash == gasket_hash).first()
+
+        if gasket is None:
+            gasket = Gasket(
+                hash=gasket_hash,
+                initial_curvatures=json.dumps(curvatures),
+                num_circles=0,
+                max_depth_cached=max_depth,
+                min_radius_cached=min_radius,
+                access_count=1,
+            )
+            session.add(gasket)
+            session.flush()
+            existing_words: set = set()
+        else:
+            if service._covers(gasket, max_depth, min_radius):
+                gasket.access_count += 1
+                gasket.last_accessed_at = datetime.utcnow()
+                gasket_id = gasket.id
+                session.commit()
+                return gasket_id
+            existing_words = {
+                row[0]
+                for row in session.query(Circle.word).filter(Circle.gasket_id == gasket.id)
+            }
+            gasket.max_depth_cached = max(gasket.max_depth_cached or 0, max_depth)
+            if gasket.min_radius_cached is None or min_radius is None:
+                # One of the budgets was unpruned: the merged cache is only
+                # safely claimable at the coarser (pruned) resolution unless
+                # both were unpruned.
+                merged = None if (gasket.min_radius_cached is None and min_radius is None) else (
+                    min_radius if gasket.min_radius_cached is None else gasket.min_radius_cached
+                )
+                gasket.min_radius_cached = merged
+            else:
+                gasket.min_radius_cached = max(gasket.min_radius_cached, min_radius)
+
+        added = 0
+        for record in records:
+            if db_word(record) in existing_words:
+                continue
+            session.add(record_to_row(record, gasket.id))
+            added += 1
+        gasket.num_circles = (gasket.num_circles or 0) + added
+        gasket_id = gasket.id
+        session.commit()
+        return gasket_id
+    except Exception:
+        session.rollback()
+        return None
+    finally:
+        session.close()
+
+
 class GasketService:
     """Service for gasket operations with resolution-aware caching."""
 

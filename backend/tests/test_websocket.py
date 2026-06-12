@@ -36,6 +36,10 @@ class TestWebSocketGasketGenerate:
     """Tests for WebSocket /ws/gasket/generate endpoint."""
 
     def setup_method(self):
+        from db.base import Base, engine
+
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
         self.client = TestClient(app)
 
     def collect(self, websocket):
@@ -65,7 +69,8 @@ class TestWebSocketGasketGenerate:
 
         assert messages[-1]["type"] == "complete"
         assert messages[-1]["total_circles"] == 3
-        assert messages[-1]["gasket_id"] is None
+        # Runs persist on completion (Milestone 4)
+        assert isinstance(messages[-1]["gasket_id"], int)
 
     def test_websocket_invalid_json(self):
         with self.client.websocket_connect("/ws/gasket/generate") as websocket:

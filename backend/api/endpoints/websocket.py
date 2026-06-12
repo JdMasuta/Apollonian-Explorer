@@ -28,7 +28,7 @@ from pydantic import ValidationError
 
 from core.engine.walk import GeneratedCircle, WalkBudget, walk
 from schemas import GasketCreate
-from services.gasket_service import build_seed, parse_curvature_string
+from services.gasket_service import build_seed, parse_curvature_string, persist_walk_records
 from services.serializers import record_to_api_circle
 
 router = APIRouter()
@@ -73,12 +73,14 @@ def _produce(
 
     total = 0
     batch: List[dict] = []
+    records: List[GeneratedCircle] = []
     last_generation = 0
     try:
         for record in generate_records(curvatures, max_depth, min_radius):
             if stop.is_set():
                 return
             batch.append(record_to_api_circle(record))
+            records.append(record)
             last_generation = record.generation
             total += 1
             if len(batch) >= BATCH_SIZE:
@@ -102,7 +104,9 @@ def _produce(
                 }
             )
         if not stop.is_set():
-            put({"type": "complete", "gasket_id": None, "total_circles": total})
+            # Persist the run (best-effort) so analytics/export can use it.
+            gasket_id = persist_walk_records(curvatures, max_depth, min_radius, records)
+            put({"type": "complete", "gasket_id": gasket_id, "total_circles": total})
     except Exception as e:  # surfaced to the client as a protocol error
         if not stop.is_set():
             put({"type": "error", "message": f"Generation error: {str(e)}"})

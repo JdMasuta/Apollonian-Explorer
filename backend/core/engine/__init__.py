@@ -16,6 +16,9 @@ This package replaces the square-root-per-step Descartes/BFS pipeline with:
 - ``metrics``: research metrics (residue classes, prime bends, word data).
 """
 
+#: Engine version embedded in exports for reproducibility (Milestone 4).
+ENGINE_VERSION = "2.0.0"
+
 from core.engine.inversive import Exact, InversiveCircle
 from core.engine.group import reflect, reflection_coefficients
 from core.engine.seeds import (

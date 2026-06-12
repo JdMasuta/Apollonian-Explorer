@@ -35,6 +35,38 @@ export interface HitResult {
   id: number | null;
 }
 
+/** Per-circle coloring metric (REVAMP_BLUEPRINT.md Phase 2.3 / M4). */
+export type ColorMetric =
+  | { kind: 'generation' }
+  | { kind: 'logCurvature' }
+  | { kind: 'residue'; modulus: number }
+  | { kind: 'parity' }
+  | { kind: 'prime' }
+  | { kind: 'limb' };
+
+/** Integer bend from a "num/denom" wire string, when integral and safe. */
+export function integerBend(curvature: string): number | null {
+  const slash = curvature.indexOf('/');
+  const num = Number(slash === -1 ? curvature : curvature.slice(0, slash));
+  const den = slash === -1 ? 1 : Number(curvature.slice(slash + 1));
+  if (!Number.isSafeInteger(num) || !Number.isSafeInteger(den) || den === 0) {
+    return null;
+  }
+  return num % den === 0 ? num / den : null;
+}
+
+/** Trial-division primality for wire-scale bends (< 2^53; bends < 1e15). */
+export function isPrimeBend(bend: number | null): boolean {
+  if (bend === null) return false;
+  const n = Math.abs(bend);
+  if (n < 2) return false;
+  if (n % 2 === 0) return n === 2;
+  for (let p = 3; p * p <= n; p += 2) {
+    if (n % p === 0) return false;
+  }
+  return true;
+}
+
 export interface Bounds {
   minX: number;
   maxX: number;
@@ -71,8 +103,11 @@ export class ProjectionIndex {
   private generations: number[] = [];
   private curvatures: string[] = [];
   private ids: (number | null)[] = [];
+  private bends: (number | null)[] = [];
+  private primeFlags: (boolean | null)[] = []; // lazy cache
 
   private maxGeneration = 0;
+  private minRadius = Infinity;
   private bounds: Bounds | null = null;
 
   /** Float coordinates relative to the cached origin. */
@@ -93,7 +128,10 @@ export class ProjectionIndex {
     this.generations = [];
     this.curvatures = [];
     this.ids = [];
+    this.bends = [];
+    this.primeFlags = [];
     this.maxGeneration = 0;
+    this.minRadius = Infinity;
     this.bounds = null;
     this.relX = [];
     this.relY = [];
@@ -124,7 +162,10 @@ export class ProjectionIndex {
       this.generations.push(circle.generation);
       this.curvatures.push(circle.curvature);
       this.ids.push(circle.id ?? null);
+      this.bends.push(integerBend(circle.curvature));
+      this.primeFlags.push(null);
       added += 1;
+      if (r > 0 && r < this.minRadius) this.minRadius = r;
 
       if (circle.generation > this.maxGeneration) {
         this.maxGeneration = circle.generation;
@@ -163,7 +204,8 @@ export class ProjectionIndex {
     camera: CameraMessage,
     width: number,
     height: number,
-    selectedWord: string | null
+    selectedWord: string | null,
+    metric: ColorMetric = { kind: 'generation' }
   ): { buffer: Float32Array; count: number; selected: Float32Array | null } {
     const parsed = parseCamera(camera);
     this.ensureRelativeCache(parsed);
@@ -176,6 +218,7 @@ export class ProjectionIndex {
     let m = 0;
     let selected: Float32Array | null = null;
     const genScale = this.maxGeneration > 0 ? 1 / this.maxGeneration : 0;
+    const maxLogB = Math.log(1 / Math.max(this.minRadius, 1e-300)) || 1;
 
     for (let i = 0; i < n; i += 1) {
       const sx = this.relX[i] * scale + cx;
@@ -193,7 +236,7 @@ export class ProjectionIndex {
       out[base] = sx;
       out[base + 1] = sy;
       out[base + 2] = rPx;
-      out[base + 3] = this.generations[i] * genScale;
+      out[base + 3] = this.metricT(i, metric, genScale, maxLogB);
       m += 1;
     }
     return { buffer: out.slice(0, m * FRAME_STRIDE), count: m, selected };
@@ -266,6 +309,45 @@ export class ProjectionIndex {
     }
     candidates.sort((a, b) => a.radius - b.radius);
     return candidates.slice(0, limit);
+  }
+
+  /** Color value t in [0,1] for circle i under the selected metric. */
+  private metricT(
+    i: number,
+    metric: ColorMetric,
+    genScale: number,
+    maxLogB: number
+  ): number {
+    switch (metric.kind) {
+      case 'generation':
+        return this.generations[i] * genScale;
+      case 'logCurvature': {
+        const logB = Math.log(1 / Math.max(this.radii[i], 1e-300));
+        return Math.min(1, Math.max(0, logB / maxLogB));
+      }
+      case 'residue': {
+        const bend = this.bends[i];
+        if (bend === null) return 0.5;
+        const m = Math.max(2, metric.modulus);
+        return (((bend % m) + m) % m) / (m - 1);
+      }
+      case 'parity': {
+        const bend = this.bends[i];
+        return bend === null ? 0.5 : Math.abs(bend % 2);
+      }
+      case 'prime': {
+        if (this.primeFlags[i] === null) {
+          this.primeFlags[i] = isPrimeBend(this.bends[i]);
+        }
+        return this.primeFlags[i] ? 1 : 0;
+      }
+      case 'limb': {
+        const word = this.words[i];
+        const letter = word.startsWith('S') ? word[1] : word[0];
+        const j = Number(letter);
+        return Number.isFinite(j) ? j / 3 : 0;
+      }
+    }
   }
 
   // ------------------------------------------------------------------

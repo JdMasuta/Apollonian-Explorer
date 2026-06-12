@@ -11,7 +11,7 @@
 
 import type { CameraMessage } from '../camera/exactCamera';
 import type { CircleData } from '../services/websocketService';
-import type { HitResult, Bounds } from '../workers/projection';
+import type { ColorMetric, HitResult, Bounds } from '../workers/projection';
 import { FRAME_STRIDE } from '../workers/projection';
 
 export { FRAME_STRIDE };
@@ -109,6 +109,10 @@ class RendererClient {
 
   setSelected(word: string | null): void {
     this.ensureWorker().postMessage({ type: 'select', word });
+  }
+
+  setMetric(metric: ColorMetric): void {
+    this.ensureWorker().postMessage({ type: 'metric', metric });
   }
 
   /** Latest-wins camera update; coalesced while a frame is in flight. */

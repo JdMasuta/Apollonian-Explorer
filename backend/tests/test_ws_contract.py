@@ -27,7 +27,17 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from db.base import Base, engine
 from main import app
+
+
+@pytest.fixture(scope="module", autouse=True)
+def clean_db():
+    """WS runs persist now: isolate this module's writes."""
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
 
 # Frontend parseValue() accepts "num/denom" fraction strings (or a plain
 # decimal). The backend serializes every numeric field as "num/denom".
@@ -108,8 +118,18 @@ class TestProtocolContract:
     def test_complete_message_shape(self, messages):
         complete = messages[-1]
         assert set(complete.keys()) == {"type", "gasket_id", "total_circles"}
-        assert complete["gasket_id"] is None or isinstance(complete["gasket_id"], int)
+        # Runs persist on completion (Milestone 4): the id is real.
+        assert isinstance(complete["gasket_id"], int)
         assert isinstance(complete["total_circles"], int)
+
+    def test_run_is_persisted_and_reusable(self, messages):
+        gasket_id = messages[-1]["gasket_id"]
+        client = TestClient(app)
+        response = client.get(f"/api/gaskets/{gasket_id}")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["initial_curvatures"] == ["-1", "2", "2"]
+        assert body["num_circles"] >= messages[-1]["total_circles"]
 
     def test_total_circles_matches_stream(self, messages):
         streamed = sum(m["circles_count"] for m in messages if m["type"] == "progress")

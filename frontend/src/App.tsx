@@ -24,6 +24,9 @@ import { useGasketStore } from './stores/gasketStore';
 import websocketService from './services/websocketService';
 import rendererClient from './renderer/rendererClient';
 import { parseValue } from './components/GasketCanvas/utils';
+import ColorMetricPicker from './components/ResearchPanel/ColorMetricPicker';
+import ExportButtons from './components/ResearchPanel/ExportButtons';
+import AnalyticsPanel from './components/ResearchPanel/AnalyticsPanel';
 
 /**
  * Resolution bound sent to the backend: circles smaller than roughly half a
@@ -57,6 +60,7 @@ const DEEPEN_MAX_ROUNDS = 3;
 function App() {
   const [curvatures, setCurvatures] = useState('1, 1, 1');
   const [maxDepth, setMaxDepth] = useState(3);
+  const [analyticsRefresh, setAnalyticsRefresh] = useState(0);
 
   // Gasket store state (metadata only; geometry lives in the worker)
   const circleCount = useGasketStore((state) => state.circleCount);
@@ -162,6 +166,7 @@ function App() {
               max_depth: maxDepth,
               total_circles: data.total_circles,
             });
+            setAnalyticsRefresh((k) => k + 1);
           },
 
           onError: (data) => {
@@ -266,6 +271,7 @@ function App() {
         }
       }
       deepenStateRef.current = { minRadius: desired, vp };
+      setAnalyticsRefresh((k) => k + 1);
     } catch (err) {
       console.warn('[deepen] viewport refinement failed:', err);
     } finally {
@@ -364,6 +370,16 @@ function App() {
                     </Typography>
                   </Box>
                 )}
+
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Research
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    <ColorMetricPicker />
+                    <ExportButtons gasketId={gasket?.id ?? null} />
+                  </Stack>
+                </Box>
               </Stack>
             </Paper>
           </Grid>
@@ -403,6 +419,13 @@ function App() {
             </Paper>
           </Grid>
         </Grid>
+
+        <Paper elevation={2} sx={{ p: 2, mt: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Curvature Statistics
+          </Typography>
+          <AnalyticsPanel gasketId={gasket?.id ?? null} refreshKey={analyticsRefresh} />
+        </Paper>
       </Box>
     </Container>
   );

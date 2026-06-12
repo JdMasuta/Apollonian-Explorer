@@ -1394,10 +1394,25 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-12 12:00] Revamp Milestone 4: Research Tooling + WebSocket Persistence
+**What was done**: Closed the long-standing "gasket_id: null" TODO and delivered the researcher-facing UI: coloring metrics, analytics panel, and data export.
+**Specifics — backend**:
+- `persist_walk_records()` (gasket_service.py): WebSocket runs persist on completion from the producer thread (own session; word-deduplicated; conservative cache-coverage merge that never over-claims); `complete` messages now carry the real gasket id (contract + reuse tests added)
+- JSON export gains reproducibility metadata: engine version (core.engine.ENGINE_VERSION), max_depth_cached, min_radius_cached
+**Specifics — frontend**:
+- Coloring metrics evaluated in the projection worker (`ColorMetric`): generation, log|curvature|, residue mod m (default 24 — the local-global classes), parity, prime bends (trial division on wire-scale ints), generator limb; `ColorMetricPicker` in a new Research section
+- `AnalyticsPanel` (@mui/x-charts, user-approved dep): bend histogram + N(T) on log-log axes + growth-exponent fit vs δ ≈ 1.305688, auto-refreshing after generation and deepening rounds
+- `ExportButtons`: CSV/JSON downloads from /export
+**Verified live**: WS run → persisted gasket id → analytics (δ=1.0612 at depth 5) → export with metadata, all through the real server.
+**Tests**: backend 348; frontend 61 (worker metric tests incl. Float32 key handling); all linters/build clean.
+**Status**: ✅ Complete — M5 (group-action explorer incl. parabolic cusp acceleration, ISSUES #6) and M6 (hardening/docs) remain per the approved plan.
+
+---
+
 ## Statistics
 
-**Total Entries**: 29
-**Completed**: 29
+**Total Entries**: 30
+**Completed**: 30
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 11:00
+**Last Updated**: 2026-06-12 12:00

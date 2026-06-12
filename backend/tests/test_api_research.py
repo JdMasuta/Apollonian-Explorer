@@ -279,6 +279,10 @@ class TestExport:
         assert response.status_code == 200
         data = json.loads(response.text)
         assert data["gasket_id"] == gasket_id
+        # Reproducibility metadata (Milestone 4)
+        assert data["engine_version"]
+        assert data["max_depth_cached"] == 4
+        assert data["initial_curvatures"] == ["-1", "2", "2"]
         assert len(data["circles"]) == 164
         bends = sorted(
             int(c["curvature_exact"]) for c in data["circles"]

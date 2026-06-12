@@ -151,6 +151,46 @@ describe('ProjectionIndex', () => {
     expect(words).not.toContain('far');
   });
 
+  it('computes coloring metrics', () => {
+    index.add(classicSeed());
+    const camera = serializeCamera(cameraAt(200));
+
+    const t = (metric: import('./projection').ColorMetric) => {
+      const { buffer, count } = index.project(camera, W, H, null, metric);
+      const map = new Map<number, number>();
+      for (let i = 0; i < count; i += 1) {
+        map.set(buffer[i * 4 + 2], buffer[i * 4 + 3]); // rPx -> t
+      }
+      return map;
+    };
+
+    // residue mod 24: bend 3 -> 3/23, bend -1 -> 23/23
+    const residue = t({ kind: 'residue', modulus: 24 });
+    expect(residue.get(Math.fround(200 / 3))).toBeCloseTo(3 / 23, 6); // bend-3 circle
+    expect(residue.get(200)).toBeCloseTo(1, 6); // bend -1 -> residue 23
+
+    // parity: bend 2 -> 0, bend 3 -> 1
+    const parity = t({ kind: 'parity' });
+    expect(parity.get(100)).toBe(0);
+    expect(parity.get(Math.fround(200 / 3))).toBe(1);
+
+    // prime: 2 and 3 prime -> 1; -1 -> 0
+    const prime = t({ kind: 'prime' });
+    expect(prime.get(100)).toBe(1);
+    expect(prime.get(200)).toBe(0);
+  });
+
+  it('integerBend and isPrimeBend helpers', async () => {
+    const { integerBend, isPrimeBend } = await import('./projection');
+    expect(integerBend('6/1')).toBe(6);
+    expect(integerBend('-1/1')).toBe(-1);
+    expect(integerBend('3/2')).toBeNull();
+    expect(isPrimeBend(11)).toBe(true);
+    expect(isPrimeBend(-11)).toBe(true);
+    expect(isPrimeBend(1)).toBe(false);
+    expect(isPrimeBend(null)).toBe(false);
+  });
+
   it('tracks bounds incrementally', () => {
     index.add(classicSeed());
     const bounds = index.getBounds()!;

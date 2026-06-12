@@ -9,7 +9,7 @@
  * ever sees small messages and transferable Float32Array frames.
  */
 
-import { ProjectionIndex } from './projection';
+import { ProjectionIndex, type ColorMetric } from './projection';
 import type { CameraMessage } from '../camera/exactCamera';
 import type { CircleData } from '../services/websocketService';
 
@@ -17,6 +17,7 @@ export type WorkerRequest =
   | { type: 'add'; circles: CircleData[] }
   | { type: 'clear' }
   | { type: 'select'; word: string | null }
+  | { type: 'metric'; metric: ColorMetric }
   | {
       type: 'camera';
       camera: CameraMessage;
@@ -48,6 +49,7 @@ export type WorkerResponse =
 const index = new ProjectionIndex();
 let lastCamera: { camera: CameraMessage; width: number; height: number } | null = null;
 let selectedWord: string | null = null;
+let metric: ColorMetric = { kind: 'generation' };
 let frameCounter = 0;
 
 const scope = self as unknown as {
@@ -61,7 +63,8 @@ function emitFrame(frameId: number): void {
     lastCamera.camera,
     lastCamera.width,
     lastCamera.height,
-    selectedWord
+    selectedWord,
+    metric
   );
   const transferable = buffer.buffer as ArrayBuffer;
   scope.postMessage(
@@ -91,6 +94,12 @@ scope.onmessage = (event: MessageEvent<WorkerRequest>) => {
     }
     case 'select': {
       selectedWord = message.word;
+      frameCounter += 1;
+      emitFrame(frameCounter);
+      break;
+    }
+    case 'metric': {
+      metric = message.metric;
       frameCounter += 1;
       emitFrame(frameCounter);
       break;
