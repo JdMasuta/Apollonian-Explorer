@@ -71,7 +71,7 @@ def run_with_retry(
 def commit_with_retry(
     session: Session,
     *,
-    restage: Optional[Callable[[], None]] = None,
+    restage: Optional[Callable[[], object]] = None,
     attempts: int = DEFAULT_ATTEMPTS,
     base_delay: float = BASE_DELAY,
 ) -> None:

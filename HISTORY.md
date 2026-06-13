@@ -1438,10 +1438,29 @@ Final run (all fixes applied):
 
 ---
 
+### [2026-06-13 05:30] Bugfix: SQLite write-lock 500s during viewport deepening
+**What was done**: Diagnosed and fixed a cascade of HTTP 500s on POST `/api/gaskets` while zooming a freshly generated gasket. Root cause confirmed (with a standalone `sqlite3` reproduction): the WebSocket persist worker thread and the HTTP request threadpool write the same SQLite file with zero concurrency configuration, so a competing writer fails immediately with `database is locked`. See DEBUG_LOG ERR-015.
+**Specifics**:
+- **Root cause**: `db/base.py` set only `check_same_thread=False` — no `journal_mode=WAL`, no `busy_timeout`. Default SQLite (rollback journal, `busy_timeout=0`) fails a second writer instantly instead of waiting. The post-generation `persist_walk_records` bulk commit (worker thread, own `SessionLocal`) races the `ensure-resolution` POST's `_expand`/access-tracking commit. Reproduced: default → instant `database is locked`; WAL + `busy_timeout=5000` → competing writer waits ~433ms and succeeds.
+- **Primary fix**: connect-time PRAGMA listener (`event.listens_for(engine, "connect")`): `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL` (SQLite-only guard).
+- **Hardening (defense-in-depth)**: `db/concurrency.py` adds `commit_with_retry` (rollback → re-stage via callback → retry, bounded exponential backoff) and `run_with_retry` (retry a self-contained unit). Applied to every write path in `gasket_service.py`: `persist_walk_records` (fresh session per attempt, still best-effort), `create_or_get_gasket`/`get_gasket` (access bump + `_expand`, re-staged so `access_count` increments exactly once — response still built before commit per ISSUES.md #1), `deepen`/`deepen_cusp` (pure walk computed once, only DB staging retried), `_generate_and_persist` (pending gasket tree rebuilt per attempt), `delete_gasket`.
+**Files changed**:
+- `backend/db/base.py` - connect-time PRAGMA listener (WAL + busy_timeout + synchronous=NORMAL)
+- `backend/db/concurrency.py` - new module: `commit_with_retry`, `run_with_retry`
+- `backend/services/gasket_service.py` - retry/re-stage on all write paths
+- `.gitignore` - ignore WAL sidecars (`*.db-wal`, `*.db-shm`, `*.db-journal`)
+**Tests added**:
+- `backend/tests/test_db_concurrency.py` - PRAGMAs applied per connection; `commit_with_retry`/`run_with_retry` unit tests (transient-lock recovery, non-lock propagation, budget exhaustion); two real-SQLite integration tests injecting a one-shot transient lock (access bump applied exactly once; persist retried on a fresh session)
+**Commits**: `fa221be` - "fix(db): WAL + busy_timeout for concurrent SQLite writers"; `280b46c` - "fix(service): retry transient SQLite write-locks on all write paths"
+**Status**: ✅ Complete
+**Notes**: Full backend suite 369 → 379 passing (10 new). WAL is a no-op for in-memory DBs and the PRAGMAs are guarded to SQLite, so a future PostgreSQL backend is untouched. The retry contract is "re-stageable": a rollback discards pending state, so each callback rebuilds all mutations from scratch and keeps pure computation outside.
+
+---
+
 ## Statistics
 
-**Total Entries**: 32
-**Completed**: 32
+**Total Entries**: 33
+**Completed**: 33
 **Partial**: 0
 **Blocked**: 0
-**Last Updated**: 2026-06-12 21:30
+**Last Updated**: 2026-06-13 05:30

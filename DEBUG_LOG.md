@@ -212,6 +212,58 @@ Either include it or remove the dependency array.
 
 ### Database Errors
 
+#### [ERR-015] 2026-06-13 - "database is locked" 500s during viewport deepening
+**Error Message**:
+```
+(browser) [deepen] viewport refinement failed: Error: ensure-resolution failed: 500
+(network) POST /api/gaskets -> 500 Internal Server Error (repeated, ~6-27ms each)
+(backend) sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) database is locked
+          -> caught at api/endpoints/gaskets.py -> {"error_code": "GENERATION_ERROR"}
+```
+**Context**: Zooming a freshly generated gasket. Each viewport settle fires the
+`ensure-resolution` POST `/api/gaskets` (App.tsx), which runs
+`create_or_get_gasket` (incremental `_expand` + access-tracking commit). This
+races the post-generation WebSocket persist: the `_produce` worker thread calls
+`persist_walk_records`, which opens its OWN `SessionLocal()` and does one large
+`commit()` of the whole packing.
+**Root Cause**: Two connections write the same SQLite file with **zero
+concurrency configuration**. The engine set only `check_same_thread=False`
+(`db/base.py`) — no `journal_mode=WAL`, no `busy_timeout`. Default SQLite uses a
+rollback journal with `busy_timeout=0`, so the moment a second writer wants the
+write lock it fails **immediately** with `database is locked` instead of
+waiting. The worker's bulk commit holds the lock long enough that concurrent
+ensure-resolution POSTs reliably collide. (FastAPI runs sync endpoints in a
+threadpool, so overlapping HTTP writes can collide too; the worker just widens
+the window.) Reproduced at the `sqlite3` level: default config → instant
+`database is locked`; `WAL` + `busy_timeout=5000` → the competing writer waits
+~433ms and succeeds.
+**Solution**:
+1. Per-connection PRAGMAs via `event.listens_for(engine, "connect")` in
+   `db/base.py`: `journal_mode=WAL` (readers no longer block the single
+   writer), `busy_timeout=5000` (a competing writer waits for the lock instead
+   of erroring), `synchronous=NORMAL` (safe, faster WAL companion). SQLite-only.
+2. Bounded retry backstop (`db/concurrency.py`): `commit_with_retry` (rolls
+   back, re-stages via a callback, retries) and `run_with_retry` (retries a
+   self-contained unit). Applied to every write path in `gasket_service.py`;
+   `persist_walk_records` retries on a fresh session and stays best-effort.
+3. Ignore WAL sidecars (`*.db-wal` / `*.db-shm` / `*.db-journal`).
+**Prevention**:
+- Any SQLite app with a background writer (worker thread / threadpool) MUST set
+  WAL + a non-zero `busy_timeout` at connect time — the defaults fail fast.
+- Keep retry **re-stageable**: a rollback discards pending state, so the
+  retry callback must rebuild ALL mutations from scratch; keep pure computation
+  (the generation walk) outside it so retries never re-run it.
+**Related**: ISSUES.md #1 (build response before commit — preserved); ERR-014
+(WS worker-thread generation).
+**Files Changed**:
+- `backend/db/base.py` - connect-time PRAGMA listener (WAL + busy_timeout)
+- `backend/db/concurrency.py` - new: `commit_with_retry`, `run_with_retry`
+- `backend/services/gasket_service.py` - retry on all write paths
+- `backend/tests/test_db_concurrency.py` - new: PRAGMA + helper + integration tests
+- `.gitignore` - WAL sidecar files
+
+---
+
 #### [ERR-004] 2025-10-29 - Example: Migration Fails - Column Already Exists
 **Error Message**:
 ```
@@ -536,6 +588,7 @@ generation on the event loop.
 - "migration" → ERR-004
 - "float comparison" → ERR-005
 - "out of memory" → ERR-006
+- "database is locked" / "WAL" / "busy_timeout" / "concurrency" → ERR-015
 
 ### By File
 - `backend/core/descartes.py` → ERR-002, ERR-005
