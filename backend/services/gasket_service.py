@@ -17,6 +17,7 @@ from datetime import datetime
 from fractions import Fraction
 from typing import List, Optional
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from core.engine.cusp import cusp_chain
@@ -25,6 +26,7 @@ from core.engine.seeds import seed_from_quadruple, seed_from_triple, seed_strip
 from core.engine.walk import WalkBudget, replay_word, walk
 from core.exact_math import ExactNumber
 from db import Circle, Gasket
+from db.concurrency import commit_with_retry, run_with_retry
 from schemas import CircleResponse, GasketResponse
 from services.serializers import (
     db_word,
@@ -87,72 +89,94 @@ def persist_walk_records(
     gasket id, or None if persistence failed (streaming already succeeded;
     persistence is best-effort).
     """
+    import logging
+    import traceback
+
     from db.base import SessionLocal
 
-    session = SessionLocal()
-    try:
-        service = GasketService(session)
-        gasket_hash = service._generate_hash(curvatures)
-        gasket = session.query(Gasket).filter(Gasket.hash == gasket_hash).first()
+    def _persist_once() -> Optional[int]:
+        """One persistence attempt on a fresh session (re-runnable on a lock).
 
-        if gasket is None:
-            gasket = Gasket(
-                hash=gasket_hash,
-                initial_curvatures=json.dumps(curvatures),
-                num_circles=0,
-                max_depth_cached=max_depth,
-                min_radius_cached=min_radius,
-                access_count=1,
-            )
-            session.add(gasket)
-            session.flush()
-            existing_words: set = set()
-        else:
-            if service._covers(gasket, max_depth, min_radius):
-                gasket.access_count += 1
-                gasket.last_accessed_at = datetime.utcnow()
-                gasket_id = gasket.id
-                session.commit()
-                return gasket_id
-            existing_words = {
-                row[0]
-                for row in session.query(Circle.word).filter(Circle.gasket_id == gasket.id)
-            }
-            gasket.max_depth_cached = max(gasket.max_depth_cached or 0, max_depth)
-            if gasket.min_radius_cached is None or min_radius is None:
-                # One of the budgets was unpruned: the merged cache is only
-                # safely claimable at the coarser (pruned) resolution unless
-                # both were unpruned.
-                merged = None if (gasket.min_radius_cached is None and min_radius is None) else (
-                    min_radius if gasket.min_radius_cached is None else gasket.min_radius_cached
+        Idempotent: cache-aware and word-deduplicated, so a transient
+        write-lock can safely roll back and retry from scratch.
+        """
+        session = SessionLocal()
+        try:
+            service = GasketService(session)
+            gasket_hash = service._generate_hash(curvatures)
+            gasket = session.query(Gasket).filter(Gasket.hash == gasket_hash).first()
+
+            if gasket is None:
+                gasket = Gasket(
+                    hash=gasket_hash,
+                    initial_curvatures=json.dumps(curvatures),
+                    num_circles=0,
+                    max_depth_cached=max_depth,
+                    min_radius_cached=min_radius,
+                    access_count=1,
                 )
-                gasket.min_radius_cached = merged
+                session.add(gasket)
+                session.flush()
+                existing_words: set = set()
             else:
-                gasket.min_radius_cached = max(gasket.min_radius_cached, min_radius)
+                if service._covers(gasket, max_depth, min_radius):
+                    gasket.access_count += 1
+                    gasket.last_accessed_at = datetime.utcnow()
+                    gasket_id = gasket.id
+                    session.commit()
+                    return gasket_id
+                existing_words = {
+                    row[0]
+                    for row in session.query(Circle.word).filter(Circle.gasket_id == gasket.id)
+                }
+                gasket.max_depth_cached = max(gasket.max_depth_cached or 0, max_depth)
+                if gasket.min_radius_cached is None or min_radius is None:
+                    # One of the budgets was unpruned: the merged cache is only
+                    # safely claimable at the coarser (pruned) resolution unless
+                    # both were unpruned.
+                    merged = None if (gasket.min_radius_cached is None and min_radius is None) else (
+                        min_radius if gasket.min_radius_cached is None else gasket.min_radius_cached
+                    )
+                    gasket.min_radius_cached = merged
+                else:
+                    gasket.min_radius_cached = max(gasket.min_radius_cached, min_radius)
 
-        added = 0
-        for record in records:
-            if db_word(record) in existing_words:
-                continue
-            session.add(record_to_row(record, gasket.id))
-            added += 1
-        gasket.num_circles = (gasket.num_circles or 0) + added
-        gasket_id = gasket.id
-        session.commit()
-        return gasket_id
-    except Exception:
-        # Best-effort: streaming already succeeded. But never silently —
-        # a persistence bug otherwise hides behind gasket_id = null.
-        import logging
-        import traceback
+            added = 0
+            for record in records:
+                if db_word(record) in existing_words:
+                    continue
+                session.add(record_to_row(record, gasket.id))
+                added += 1
+            gasket.num_circles = (gasket.num_circles or 0) + added
+            gasket_id = gasket.id
+            session.commit()
+            return gasket_id
+        except OperationalError:
+            # Transient write-lock (or another DB error): roll back and let
+            # run_with_retry decide whether to retry on a fresh session.
+            session.rollback()
+            raise
+        except Exception:
+            # Best-effort: streaming already succeeded. But never silently —
+            # a persistence bug otherwise hides behind gasket_id = null.
+            logging.getLogger("apollonian.persist").error(
+                "WS persistence failed:\n%s", traceback.format_exc()
+            )
+            session.rollback()
+            return None
+        finally:
+            session.close()
 
+    try:
+        return run_with_retry(_persist_once)
+    except OperationalError:
+        # Retries exhausted on a persistent write-lock (or a non-lock DB
+        # error). Streaming already succeeded, so stay best-effort — but log.
         logging.getLogger("apollonian.persist").error(
-            "WS persistence failed:\n%s", traceback.format_exc()
+            "WS persistence gave up under write contention:\n%s",
+            traceback.format_exc(),
         )
-        session.rollback()
         return None
-    finally:
-        session.close()
 
 
 class GasketService:
@@ -189,16 +213,25 @@ class GasketService:
 
         existing = self.db.query(Gasket).filter(Gasket.hash == gasket_hash).first()
         if existing:
-            if not self._covers(existing, max_depth, min_radius):
-                self._expand(existing, curvatures, max_depth, min_radius)
-            existing.access_count += 1
-            existing.last_accessed_at = datetime.utcnow()
+            needs_expand = not self._covers(existing, max_depth, min_radius)
+
+            def _stage() -> None:
+                # Re-stageable unit: a transient write-lock rolls the session
+                # back, so expansion + access bump must be reproducible from
+                # scratch. (_expand re-runs the walk on the rare retry; both it
+                # and the bump are idempotent against the rolled-back state.)
+                if needs_expand:
+                    self._expand(existing, curvatures, max_depth, min_radius)
+                existing.access_count += 1
+                existing.last_accessed_at = datetime.utcnow()
+
+            _stage()
             # Build the response BEFORE committing: commit() expires ORM
             # attributes (ISSUES.md Issue #1).
             response = self._gasket_to_response(
                 existing, max_depth, min_radius, include_circles
             )
-            self.db.commit()
+            commit_with_retry(self.db, restage=_stage)
             return response
 
         gasket = self._generate_and_persist(curvatures, max_depth, min_radius, gasket_hash)
@@ -210,13 +243,16 @@ class GasketService:
         if not gasket:
             return None
 
-        gasket.access_count += 1
-        gasket.last_accessed_at = datetime.utcnow()
+        def _bump() -> None:
+            gasket.access_count += 1
+            gasket.last_accessed_at = datetime.utcnow()
+
+        _bump()
         # Response before commit (ISSUES.md Issue #1).
         response = self._gasket_to_response(
             gasket, gasket.max_depth_cached or 0, gasket.min_radius_cached
         )
-        self.db.commit()
+        commit_with_retry(self.db, restage=_bump)
         return response
 
     def get_circles_in_viewport(
@@ -308,16 +344,22 @@ class GasketService:
             word_query = word_query.filter(Circle.word.like(f"{start_word}%"))
         existing_words = {row[0] for row in word_query}
 
-        added = 0
-        for record in records:
-            if db_word(record) in existing_words:
-                continue
-            self.db.add(record_to_row(record, gasket.id))
-            added += 1
-        gasket.num_circles = (gasket.num_circles or 0) + added
-        if gasket.max_depth_cached is not None and absolute_depth > gasket.max_depth_cached:
-            gasket.max_depth_cached = absolute_depth
-        self.db.commit()
+        def _stage() -> int:
+            # Re-stageable: the walk (above) is pure and runs once; only the
+            # DB writes live here, so a transient lock can roll back and retry.
+            added = 0
+            for record in records:
+                if db_word(record) in existing_words:
+                    continue
+                self.db.add(record_to_row(record, gasket.id))
+                added += 1
+            gasket.num_circles = (gasket.num_circles or 0) + added
+            if gasket.max_depth_cached is not None and absolute_depth > gasket.max_depth_cached:
+                gasket.max_depth_cached = absolute_depth
+            return added
+
+        added = _stage()
+        commit_with_retry(self.db, restage=_stage)
 
         circles = [
             record_to_api_circle(record)
@@ -360,14 +402,20 @@ class GasketService:
                 Circle.gasket_id == gasket.id, Circle.word.in_(words)
             )
         } if words else set()
-        added = 0
-        for record in result.records:
-            if record.word in existing:
-                continue
-            self.db.add(record_to_row(record, gasket.id))
-            added += 1
-        gasket.num_circles = (gasket.num_circles or 0) + added
-        self.db.commit()
+        def _stage() -> int:
+            # Re-stageable: cusp_chain (pure) ran once above; only the DB
+            # writes live here so a transient lock can roll back and retry.
+            added = 0
+            for record in result.records:
+                if record.word in existing:
+                    continue
+                self.db.add(record_to_row(record, gasket.id))
+                added += 1
+            gasket.num_circles = (gasket.num_circles or 0) + added
+            return added
+
+        added = _stage()
+        commit_with_retry(self.db, restage=_stage)
 
         return {
             "gasket_id": gasket.id,
@@ -447,8 +495,14 @@ class GasketService:
         gasket = self.db.query(Gasket).filter(Gasket.id == gasket_id).first()
         if not gasket:
             return False
-        self.db.delete(gasket)
-        self.db.commit()
+
+        def _stage() -> None:
+            # Re-stageable: a rollback un-deletes the gasket, so re-issue the
+            # delete on retry.
+            self.db.delete(gasket)
+
+        _stage()
+        commit_with_retry(self.db, restage=_stage)
         return True
 
     # ------------------------------------------------------------------
@@ -520,24 +574,31 @@ class GasketService:
         parsed = [parse_curvature_string(c) for c in curvatures]
         seed = build_seed(parsed)
         budget = WalkBudget(max_depth=max_depth, min_radius=min_radius)
-        records = list(walk(seed, budget))
+        records = list(walk(seed, budget))  # pure compute, once
 
-        gasket = Gasket(
-            hash=gasket_hash,
-            initial_curvatures=json.dumps(curvatures),
-            num_circles=len(records),
-            max_depth_cached=max_depth,
-            min_radius_cached=min_radius,
-            access_count=1,
-        )
-        self.db.add(gasket)
-        self.db.flush()  # obtain gasket.id
+        # The gasket row is pending until commit, so a transient write-lock
+        # rollback expunges it: rebuild the whole pending tree on each attempt.
+        holder: dict = {}
 
-        for record in records:
-            self.db.add(record_to_row(record, gasket.id))
+        def _stage() -> None:
+            gasket = Gasket(
+                hash=gasket_hash,
+                initial_curvatures=json.dumps(curvatures),
+                num_circles=len(records),
+                max_depth_cached=max_depth,
+                min_radius_cached=min_radius,
+                access_count=1,
+            )
+            self.db.add(gasket)
+            self.db.flush()  # obtain gasket.id
 
-        self.db.commit()
-        return gasket
+            for record in records:
+                self.db.add(record_to_row(record, gasket.id))
+            holder["gasket"] = gasket
+
+        _stage()
+        commit_with_retry(self.db, restage=_stage)
+        return holder["gasket"]
 
     def _gasket_to_response(
         self,
