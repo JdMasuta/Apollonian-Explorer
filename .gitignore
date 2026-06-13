@@ -26,6 +26,10 @@ frontend/dist/
 *.db
 *.sqlite
 *.sqlite3
+# WAL sidecar files (journal_mode=WAL writes <db>-wal / <db>-shm alongside the db)
+*.db-wal
+*.db-shm
+*.db-journal
 
 # Environment
 .env
